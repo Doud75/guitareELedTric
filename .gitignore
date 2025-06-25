@@ -1,0 +1,34 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Output of the go coverage tool
+*.coverprofile
+
+# Vendor directory (if you use `go mod vendor`)
+/vendor/
+
+# Go build cache and mod cache (generally outside project dir but safer)
+/go.sum
+*.mod
+
+# Dependency directories (remove the comment if you use these tools)
+/Godeps/
+
+# IDEs
+# VSCode
+.vscode/
+*.code-workspace
+
+# GoLand / IntelliJ IDEA
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
