@@ -1,7 +1,10 @@
+// File: internal/application/processor/service.go
 package processor
 
 import (
 	"log"
+	"reflect" // <<< ON A BESOIN DE CET OUTIL POUR COMPARER
+
 	"guitarHetic/internal/config"
 	"guitarHetic/internal/domain/artnet"
 	"guitarHetic/internal/domain/ehub"
@@ -9,33 +12,35 @@ import (
 
 type DestinationChannel chan<- artnet.LEDMessage
 
-
 type FinalRouteInfo struct {
 	IsEnabled       bool
-	TargetUniverse  int  
-	DMXBufferOffset int  
+	TargetUniverse  int
+	DMXBufferOffset int
 }
 
+// La struct Service a maintenant un champ pour se souvenir de la dernière config.
 type Service struct {
-	configIn <-chan *ehub.EHubConfigMsg
-	updateIn <-chan *ehub.EHubUpdateMsg
-	dest     DestinationChannel
-	routingTable []FinalRouteInfo
+	configIn       <-chan *ehub.EHubConfigMsg
+	updateIn       <-chan *ehub.EHubUpdateMsg
+	dest           DestinationChannel
+	lastUsedConfig *ehub.EHubConfigMsg // <<< CHAMP AJOUTÉ
+	routingTable   []FinalRouteInfo
 }
 
+// Le constructeur doit initialiser le nouveau champ à nil.
 func NewService(
 	configIn <-chan *ehub.EHubConfigMsg,
 	updateIn <-chan *ehub.EHubUpdateMsg,
 	dest DestinationChannel,
 ) *Service {
 	return &Service{
-		configIn:     configIn,
-		updateIn:     updateIn,
-		dest:         dest,
-		routingTable: nil, 
+		configIn:       configIn,
+		updateIn:       updateIn,
+		dest:           dest,
+		lastUsedConfig: nil, // Important: on n'a encore rien utilisé.
+		routingTable:   nil,
 	}
 }
-
 
 func (s *Service) Start() {
 	go func() {
@@ -43,16 +48,24 @@ func (s *Service) Start() {
 
 		for {
 			select {
-			case configMsg := <-s.configIn:
+			case newConfigMsg := <-s.configIn: 
+
+				if s.lastUsedConfig != nil && reflect.DeepEqual(s.lastUsedConfig, newConfigMsg) {
+					continue
+				}
+
+				log.Println("Processor: Nouvelle configuration eHuB détectée. Reconstruction de la table de routage...")
 				
 				physicalConfig, err := config.Load("internal/config/routing.csv")
 				if err != nil {
 					log.Printf("Processor: ERREUR, impossible de charger le fichier de routing: %v", err)
-					s.routingTable = nil 
+					s.routingTable = nil
 					continue
 				}
 				
-				s.buildRoutingTable(configMsg, physicalConfig)
+				s.buildRoutingTable(newConfigMsg, physicalConfig)
+
+				s.lastUsedConfig = newConfigMsg
 
 			case updateMsg := <-s.updateIn:
 				if s.routingTable == nil {
@@ -99,7 +112,6 @@ func (s *Service) buildRoutingTable(eHubConfig *ehub.EHubConfigMsg, physicalConf
 		physicalMap[entry.EntityID] = entry
 	}
 	
-
 	var maxEntityID uint16 = 0
 	for _, r := range eHubConfig.Ranges {
 		if r.EntityEnd > maxEntityID {
@@ -110,10 +122,8 @@ func (s *Service) buildRoutingTable(eHubConfig *ehub.EHubConfigMsg, physicalConf
 	newTable := make([]FinalRouteInfo, maxEntityID + 1)
 	log.Printf("Processor: Allocation d'une nouvelle table de routage pour %d entités max.", maxEntityID+1)
 	
-
 	for _, eHubRange := range eHubConfig.Ranges {
 		for entityID := eHubRange.EntityStart; entityID <= eHubRange.EntityEnd; entityID++ {
-			
 			if physicalRoute, ok := physicalMap[int(entityID)]; ok {
 				newTable[entityID] = FinalRouteInfo{
 					IsEnabled:       true,
