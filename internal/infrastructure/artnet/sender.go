@@ -32,8 +32,6 @@ func (s *Sender) Run(ctx context.Context, in <-chan domainArtnet.LEDMessage) {
             s.Close()
             return
         case msg := <-in:
-			log.Printf("ArtNet Sender: Reçu un buffer DMX à envoyer -> Univers: %d", msg.Universe)
-			log.Printf("   -> Aperçu des données: %X", msg.Data[:12])
 
             packet := domainArtnet.Build(msg.Universe, msg.Data)
             conn, ok := s.conns[msg.Universe]

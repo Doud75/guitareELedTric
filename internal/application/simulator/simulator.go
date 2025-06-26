@@ -23,7 +23,7 @@ func RunSpecific(ctx context.Context, in chan<- domainArtnet.LEDMessage, cfg *co
             case <-ctx.Done():
                 return
             case <-t.C:
-                frames := make(map[int][510]byte)
+                frames := make(map[int][512]byte)
                 for _, r := range ranges {
                     for id := r[0]; id <= r[1]; id++ {
                         for _, entry := range cfg.RoutingTable {
@@ -73,9 +73,9 @@ func RunMovement(ctx context.Context, in chan<- domainArtnet.LEDMessage, cfg *co
                 }
 
             case <-frameTicker.C:
-                frames := make(map[int][510]byte, len(cfg.UniverseIP))
+                frames := make(map[int][512]byte, len(cfg.UniverseIP))
                 for u := range cfg.UniverseIP {
-                    frames[u] = [510]byte{}
+                    frames[u] = [512]byte{}
                 }
                 for _, r := range ranges {
                     for id0 := r[0]; id0 <= r[1]; id0++ {

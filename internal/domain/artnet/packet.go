@@ -1,7 +1,7 @@
 package artnet
 
-func Build(universe int, data [510]byte) []byte {
-    packet := make([]byte, 18+510)
+func Build(universe int, data [512]byte) []byte {
+    packet := make([]byte, 18+512)
     copy(packet[0:], []byte("Art-Net\x00"))
     packet[8] = 0x00
     packet[9] = 0x50
@@ -11,8 +11,8 @@ func Build(universe int, data [510]byte) []byte {
     packet[13] = 0x00
     packet[14] = byte(universe & 0xFF)
     packet[15] = byte((universe >> 8) & 0xFF)
-    packet[16] = byte(510 >> 8)
-    packet[17] = byte(510 & 0xFF)
+    packet[16] = byte(512 >> 8)
+    packet[17] = byte(512 & 0xFF)
     copy(packet[18:], data[:])
     return packet
 }
