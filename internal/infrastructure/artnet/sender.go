@@ -93,6 +93,7 @@ func (s *Sender) Run(ctx context.Context, in <-chan domainArtnet.LEDMessage) {
 				copy(packet[0:18], header)
 				copy(packet[18:], data[:])
 
+                log.Printf("ArtNet Sender: Envoi de l'univers %d (%s) avec %d octets de données.", universe, conn.RemoteAddr().String(), packet[18:])
                 // j'ai tout ignoré faudrait ajouter un log d'erreur mais j'voulais pas spam la console
 				_, _ = conn.Write(packet)
 			}

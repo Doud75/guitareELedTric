@@ -18,25 +18,28 @@ import (
 func main() {
 	log.Println("Démarrage du système de routage eHuB -> ArtNet...")
 
-	// --- 1. CHARGEMENT & CRÉATION DES CANAUX ---
-	
-	// Charger la config physique une fois au démarrage pour le Sender.
+	// --- ÉTAPE 1 : CHARGEMENT DE LA CONFIGURATION (UNE SEULE FOIS) ---
+	log.Println("Main: Chargement de la configuration depuis routing.csv...")
 	appConfig, err := config.Load("internal/config/routing.csv")
 	if err != nil {
+		// Si la config de base ne peut pas être chargée, l'application ne peut pas fonctionner.
+		// C'est une erreur fatale.
 		log.Fatalf("Erreur fatale: Impossible de charger routing.csv: %v", err)
 	}
+	log.Println("Main: Configuration chargée avec succès.")
 
-	// Canaux de communication
+
+	// --- ÉTAPE 2 : CRÉATION DES CANAUX DE COMMUNICATION ---
 	rawPacketChannel := make(chan ehub.RawPacket, 100)
 	configChannel := make(chan *ehub.EHubConfigMsg, 10)
 	updateChannel := make(chan *ehub.EHubUpdateMsg, 100)
-	artnetQueue := make(chan domain_artnet.LEDMessage, 500) // Canal vers le sender
+	artnetQueue := make(chan domain_artnet.LEDMessage, 500)
 
-	// Contexte pour gérer l'arrêt propre de l'application
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // S'assurer que l'annulation est appelée à la fin
+	defer cancel()
 
-	// --- 2. CONSTRUCTION DES COMPOSANTS ---
+
+	// --- ÉTAPE 3 : CONSTRUCTION DES COMPOSANTS ---
 	
 	// a) Infrastructure (couche externe)
 	const eHubPort = 8765
@@ -45,6 +48,7 @@ func main() {
 		log.Fatalf("Erreur Listener: %v", err)
 	}
 	
+	// Le Sender a besoin de la map des IPs des univers.
 	sender, err := infra_artnet.NewSender(appConfig.UniverseIP)
 	if err != nil {
 		log.Fatalf("Erreur Sender: %v", err)
@@ -53,17 +57,26 @@ func main() {
 	// b) Application (logique métier)
 	parser := app_ehub.NewParser()
 	eHubService := app_ehub.NewService(rawPacketChannel, parser, configChannel, updateChannel)
-	processorService := app_processor.NewService(configChannel, updateChannel, artnetQueue)
-
-
-	// --- 3. DÉMARRAGE DES GOROUTINES ---
 	
-	listener.Start() // On ajoutera le contexte plus tard
+	// Le Processor nous donne un canal pour lui envoyer des configs plus tard.
+	processorService, physicalConfigOut := app_processor.NewService(configChannel, updateChannel, artnetQueue)
+
+
+	// --- ÉTAPE 4 : DÉMARRAGE DES GOROUTINES ---
+	
+	listener.Start() // On ajoutera le contexte ici plus tard
 	eHubService.Start()
 	processorService.Start()
-	go sender.Run(ctx, artnetQueue) // Le sender prend le contexte pour s'arrêter
+	go sender.Run(ctx, artnetQueue)
 
-	// --- 4. ATTENTE ---
+
+	// --- ÉTAPE 5 : INJECTION DE LA CONFIGURATION INITIALE ---
+	// On n'a plus besoin de recharger le fichier. On utilise l'objet `appConfig` déjà chargé.
+	log.Println("Main: Envoi de la configuration initiale au Processor.")
+	physicalConfigOut <- appConfig
+
+
+	// --- ÉTAPE 6 : ATTENTE ---
 	log.Println("Système entièrement démarré. En attente de données eHuB de Unity...")
 	for {
 		time.Sleep(1 * time.Hour)

@@ -1,10 +1,8 @@
-// File: internal/application/processor/service.go
 package processor
 
 import (
 	"log"
-	"reflect" // <<< ON A BESOIN DE CET OUTIL POUR COMPARER
-
+	"reflect" 
 	"guitarHetic/internal/config"
 	"guitarHetic/internal/domain/artnet"
 	"guitarHetic/internal/domain/ehub"
@@ -18,28 +16,30 @@ type FinalRouteInfo struct {
 	DMXBufferOffset int
 }
 
-// La struct Service a maintenant un champ pour se souvenir de la dernière config.
 type Service struct {
-	configIn       <-chan *ehub.EHubConfigMsg
-	updateIn       <-chan *ehub.EHubUpdateMsg
+	configMsgIn       <-chan *ehub.EHubConfigMsg
+	updateMsgIn       <-chan *ehub.EHubUpdateMsg
+	PhysicalConfigIn chan *config.Config 
 	dest           DestinationChannel
-	lastUsedConfig *ehub.EHubConfigMsg // <<< CHAMP AJOUTÉ
 	routingTable   []FinalRouteInfo
+	lastUsedConfigMsg *ehub.EHubConfigMsg 
+	lastPhysicalConfig *config.Config
 }
 
-// Le constructeur doit initialiser le nouveau champ à nil.
 func NewService(
-	configIn <-chan *ehub.EHubConfigMsg,
-	updateIn <-chan *ehub.EHubUpdateMsg,
+	configMsgIn <-chan *ehub.EHubConfigMsg,
+	updateMsgIn <-chan *ehub.EHubUpdateMsg,
 	dest DestinationChannel,
-) *Service {
+) (*Service, chan *config.Config) { 
+	
+	physicalConfigChan := make(chan *config.Config)
+
 	return &Service{
-		configIn:       configIn,
-		updateIn:       updateIn,
+		configMsgIn:       configMsgIn,
+		updateMsgIn:       updateMsgIn,
+		PhysicalConfigIn: physicalConfigChan, 
 		dest:           dest,
-		lastUsedConfig: nil, // Important: on n'a encore rien utilisé.
-		routingTable:   nil,
-	}
+	}, physicalConfigChan 
 }
 
 func (s *Service) Start() {
@@ -48,26 +48,31 @@ func (s *Service) Start() {
 
 		for {
 			select {
-			case newConfigMsg := <-s.configIn: 
+			
+			case newPhysicalConfig := <-s.PhysicalConfigIn:
+				log.Println("Processor: Nouvelle configuration physique reçue. Mise à jour interne.")
+				s.lastPhysicalConfig = newPhysicalConfig
+				// Si on a déjà une config eHuB, on reconstruit la table tout de suite.
+				if s.lastUsedConfigMsg != nil {
+					log.Println("   -> Reconstruction de la table de routage avec la nouvelle config physique.")
+					s.buildRoutingTable(s.lastUsedConfigMsg, s.lastPhysicalConfig)
+				}
 
-				if s.lastUsedConfig != nil && reflect.DeepEqual(s.lastUsedConfig, newConfigMsg) {
+			case newConfigMsg := <-s.configMsgIn:
+				if s.lastUsedConfigMsg != nil && reflect.DeepEqual(s.lastUsedConfigMsg, newConfigMsg) {
 					continue
 				}
 
-				log.Println("Processor: Nouvelle configuration eHuB détectée. Reconstruction de la table de routage...")
-				
-				physicalConfig, err := config.Load("internal/config/routing.csv")
-				if err != nil {
-					log.Printf("Processor: ERREUR, impossible de charger le fichier de routing: %v", err)
-					s.routingTable = nil
-					continue
+				log.Println("Processor: Nouvelle configuration eHuB détectée.")
+				s.lastUsedConfigMsg = newConfigMsg
+				// Si on a déjà une config physique, on reconstruit la table.
+				if s.lastPhysicalConfig != nil {
+					log.Println("   -> Reconstruction de la table de routage avec la nouvelle config eHuB.")
+					s.buildRoutingTable(s.lastUsedConfigMsg, s.lastPhysicalConfig)
 				}
-				
-				s.buildRoutingTable(newConfigMsg, physicalConfig)
 
-				s.lastUsedConfig = newConfigMsg
 
-			case updateMsg := <-s.updateIn:
+			case updateMsg := <-s.updateMsgIn:
 				if s.routingTable == nil {
 					continue
 				}
