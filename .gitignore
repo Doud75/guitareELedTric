@@ -10,12 +10,8 @@
 # Output of the go coverage tool
 *.coverprofile
 
-# Vendor directory (if you use `go mod vendor`)
-/vendor/
 
-# Go build cache and mod cache (generally outside project dir but safer)
-/go.sum
-*.mod
+
 
 # Dependency directories (remove the comment if you use these tools)
 /Godeps/
