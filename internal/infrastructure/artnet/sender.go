@@ -98,8 +98,35 @@ func (s *Sender) Run(ctx context.Context, in <-chan domainArtnet.LEDMessage) {
 			for universe, currentData := range latestFrames {
 				lastData, found := s.lastSentFrames[universe]
 				
+    dataHasChanged := !found || !bytes.Equal(lastData[:], currentData[:])
+
+				
 				// On envoie seulement si: c'est la première fois (!found) OU si les données ont changé.
-				if isForceRefresh || !found || !bytes.Equal(lastData[:], currentData[:]) {
+				if isForceRefresh || dataHasChanged {
+
+if dataHasChanged && !isForceRefresh && found {
+    // On cherche le premier octet qui diffère
+    diffIndex := -1
+    for i := 0; i < dmxDataSize; i++ {
+        if lastData[i] != currentData[i] {
+            diffIndex = i
+            break
+        }
+    }
+    
+    log.Printf("Diffing a échoué pour l'univers %d.", universe)
+    if diffIndex != -1 {
+        log.Printf("  -> Première différence trouvée à l'octet %d. Last: %d, Current: %d", 
+            diffIndex, lastData[diffIndex], currentData[diffIndex])
+    } else {
+        // Ce cas ne devrait JAMAIS arriver si bytes.Equal est false, mais c'est une sécurité.
+        log.Printf("  -> Mystère: bytes.Equal a échoué mais aucune différence n'a été trouvée manuellement.")
+    }
+
+}
+
+
+					
 					conn, ok := s.conns[universe]
 					if !ok {
 						continue
@@ -127,16 +154,18 @@ func (s *Sender) Run(ctx context.Context, in <-chan domainArtnet.LEDMessage) {
 					copy(s.lastSentFrames[universe][:], currentData[:])
 				}
 			}
-			
+				if len(packetsToSend) > 10 { // Mettre un seuil pour ne pas spammer la console
+				log.Printf("ArtNet Sender: Préparation d'une rafale de %d paquets. (ForceRefresh: %v)", len(packetsToSend), isForceRefresh)
+			}
 
 			// 2. Maintenant, on envoie la liste de travail de manière étalée.
 			if len(packetsToSend) > 0 {
 				
-				pacingDuration := (6*time.Millisecond) / time.Duration(len(packetsToSend))
+				pacingDuration := (tickDuration*8/10) / time.Duration(len(packetsToSend))
 				
 				for _, p := range packetsToSend {
 					// Log final avant l'envoi réel sur le réseau.
-					log.Printf("ArtNet Sender: Envoi de l'univers %d (%s) avec %d octets.", p.uni, p.conn.RemoteAddr().String(), len(p.packet))
+					// log.Printf("ArtNet Sender: Envoi de l'univers %d (%s) avec %d octets.", p.uni, p.conn.RemoteAddr().String(), len(p.packet))
 					// j'ai tout ignoré faudrait ajouter un log d'erreur mais j'voulais pas spam la console
 					_, _ = p.conn.Write(p.packet)
 					
