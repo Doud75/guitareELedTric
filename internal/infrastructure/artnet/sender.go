@@ -1,12 +1,12 @@
 package artnet
 
 import (
+	"bytes"
 	"context"
+	domainArtnet "guitarHetic/internal/domain/artnet"
 	"log"
 	"net"
-	"time" 
-    
-	domainArtnet "guitarHetic/internal/domain/artnet"
+	"time"
 )
 
 const dmxDataSize = 512
@@ -14,7 +14,8 @@ const dmxDataSize = 512
 type Sender struct {
 	conns       map[int]*net.UDPConn
 	headerCache map[int][]byte     
-	ticker      *time.Ticker       
+	ticker      *time.Ticker 
+	lastSentFrames map[int]*[dmxDataSize]byte     
 }
 
 
@@ -22,8 +23,8 @@ func NewSender(universeIP map[int]string) (*Sender, error) {
 	s := &Sender{
 		conns:       make(map[int]*net.UDPConn),
 		headerCache: make(map[int][]byte),
-		// 33 ms = 30 images par secondes 
 		ticker:      time.NewTicker(33 * time.Millisecond),
+		lastSentFrames: make(map[int]*[dmxDataSize]byte),
 	}
 
 	log.Println("ArtNet Sender: Initialisation et pré-calcul des en-têtes...")
@@ -46,9 +47,9 @@ func NewSender(universeIP map[int]string) (*Sender, error) {
 
 
 func (s *Sender) Run(ctx context.Context, in <-chan domainArtnet.LEDMessage) {
-	log.Println("ArtNet Sender: Démarrage de la goroutine d'envoi (mode optimisé).")
+	log.Println("ArtNet Sender: Démarrage de la goroutine d'envoi (optimisée avec Diffing).")
 
-    //la on fait ce que Kevin a dit , on envoi pas les messages direct 
+	// la on fait ce que Kevin a dit , on envoi pas les messages direct
 	// on fait un map pour stocker l'état le plus récent de chaque univers.
 	// La clé est le numéro de l'univers.
 	// La valeur est un POINTEUR vers le tableau de données.
@@ -56,12 +57,12 @@ func (s *Sender) Run(ctx context.Context, in <-chan domainArtnet.LEDMessage) {
 
 	for {
 		select {
-		
+
 		case <-ctx.Done():
-			s.Close() 
+			s.Close()
 			log.Println("ArtNet Sender: Goroutine d'envoi terminée.")
 			return
-			
+
 		// Événement on recoit un message dans depuis le processor (en gros ehub)
 		case msg := <-in:
 
@@ -69,33 +70,51 @@ func (s *Sender) Run(ctx context.Context, in <-chan domainArtnet.LEDMessage) {
 			// On met simplement à jour notre map
 			// du coup si y'a 10 messages pour l'univers 5 arrivent avant le prochain tick,
 			// bah on ne gardera que le 10ème, le plus récent.
-			
-			// On vérifie si on a déjà un buffer pour cet univers.
+
 			if _, ok := latestFrames[msg.Universe]; !ok {
 				latestFrames[msg.Universe] = new([dmxDataSize]byte)
 			}
 			*latestFrames[msg.Universe] = msg.Data
 
-		// La on on attend le go du ticker.
 		case <-s.ticker.C:
-			// On parcourt tous les univers dont on connaît l'état.
-			for universe, data := range latestFrames {
-				conn, ok := s.conns[universe]
-				if !ok { continue } // ca faut que je creuse demain j'ai pas capté 
+			for universe, currentData := range latestFrames {
 
-				header, ok := s.headerCache[universe]
-				if !ok { continue } // Sécurité: pas d'en-tête pour cet univers.
-				
-				
-				// On assemble le paquet final en utilisant notre en-tête pré-calculé.
-				// (On pourrait encore optimiser en utilisant un pool de buffers ici visiblement).
-				packet := make([]byte, 18 + dmxDataSize)
-				copy(packet[0:18], header)
-				copy(packet[18:], data[:])
+				lastData, found := s.lastSentFrames[universe]
 
-                log.Printf("ArtNet Sender: Envoi de l'univers %d (%s) avec %d octets de données.", universe, conn.RemoteAddr().String(), packet[18:])
-                // j'ai tout ignoré faudrait ajouter un log d'erreur mais j'voulais pas spam la console
-				_, _ = conn.Write(packet)
+				if !found || !bytes.Equal(lastData[:], currentData[:]) {
+
+					conn, ok := s.conns[universe]
+					if !ok {
+						continue
+					}
+
+					// On récupère l'en-tête pré-calculé
+					header, ok := s.headerCache[universe]
+					if !ok {
+						continue
+					} 
+
+					// On assemble le paquet final en utilisant notre en-tête pré-calculé.
+					// (On pourrait encore optimiser en utilisant un pool de buffers ici visiblement).
+					packet := make([]byte, 18+dmxDataSize)
+					copy(packet[0:18], header)
+					copy(packet[18:], currentData[:])
+
+				
+					if !found {
+						s.lastSentFrames[universe] = new([dmxDataSize]byte)
+					}
+					*s.lastSentFrames[universe] = *currentData
+
+					// On lance l'envoi dans une goroutine pour ne pas que l'envoi d'un paquet
+					// ne bloque l'envoi des autres paquets de la même trame.
+					go func(c *net.UDPConn, p []byte, u int) {
+						// Log final avant l'envoi réel sur le réseau.
+						log.Printf("ArtNet Sender: Envoi de l'univers %d (%s) avec %d octets.", u, c.RemoteAddr().String(), len(p))
+						// j'ai tout ignoré faudrait ajouter un log d'erreur mais j'voulais pas spam la console
+						_, _ = c.Write(p)
+					}(conn, packet, universe)
+				}
 			}
 		}
 	}
