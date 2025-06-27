@@ -1,11 +1,10 @@
 {
   "name": "@wailsapp/runtime",
-  "version": "1.1.1",
+  "version": "2.0.0",
   "description": "Wails Javascript runtime library",
-  "main": "main.js",
+  "main": "runtime.js",
   "types": "runtime.d.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
     "type": "git",
@@ -21,8 +20,5 @@
   "bugs": {
     "url": "https://github.com/wailsapp/wails/issues"
   },
-  "homepage": "https://github.com/wailsapp/wails#readme",
-  "devDependencies": {
-    "dts-gen": "^0.5.8"
-  }
+  "homepage": "https://github.com/wailsapp/wails#readme"
 }
