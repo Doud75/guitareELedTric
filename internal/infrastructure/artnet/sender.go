@@ -10,6 +10,7 @@ import (
 )
 
 const dmxDataSize = 512
+const tickDuration = 33 * time.Millisecond // 30 FPS la
 
 type Sender struct {
 	conns       map[int]*net.UDPConn
@@ -23,7 +24,7 @@ func NewSender(universeIP map[int]string) (*Sender, error) {
 	s := &Sender{
 		conns:       make(map[int]*net.UDPConn),
 		headerCache: make(map[int][]byte),
-		ticker:      time.NewTicker(33 * time.Millisecond),
+		ticker:      time.NewTicker(tickDuration),
 		lastSentFrames: make(map[int]*[dmxDataSize]byte),
 	}
 
@@ -77,43 +78,63 @@ func (s *Sender) Run(ctx context.Context, in <-chan domainArtnet.LEDMessage) {
 			*latestFrames[msg.Universe] = msg.Data
 
 		case <-s.ticker.C:
-			for universe, currentData := range latestFrames {
+			// --- DÉBUT DE LA LOGIQUE DE PACING ---
+			// 1. On identifie d'abord TOUS les paquets qu'on doit envoyer dans cette trame.
+			var packetsToSend []struct {
+				conn   *net.UDPConn
+				packet []byte
+				uni    int
+			}
 
+			// On parcourt tous les univers dont on connaît l'état le plus récent.
+			for universe, currentData := range latestFrames {
 				lastData, found := s.lastSentFrames[universe]
 
+				// On envoie seulement si: c'est la première fois (!found) OU si les données ont changé.
 				if !found || !bytes.Equal(lastData[:], currentData[:]) {
-
 					conn, ok := s.conns[universe]
 					if !ok {
 						continue
 					}
-
-					// On récupère l'en-tête pré-calculé
 					header, ok := s.headerCache[universe]
 					if !ok {
 						continue
-					} 
+					}
 
-					// On assemble le paquet final en utilisant notre en-tête pré-calculé.
-					// (On pourrait encore optimiser en utilisant un pool de buffers ici visiblement).
 					packet := make([]byte, 18+dmxDataSize)
 					copy(packet[0:18], header)
 					copy(packet[18:], currentData[:])
+					
+					// Au lieu d'envoyer tout de suite, on ajoute le paquet à notre liste de travail.
+					packetsToSend = append(packetsToSend, struct {
+						conn   *net.UDPConn
+						packet []byte
+						uni    int
+					}{conn, packet, universe})
 
-				
+					// On met à jour la mémoire tout de suite.
 					if !found {
 						s.lastSentFrames[universe] = new([dmxDataSize]byte)
 					}
-					*s.lastSentFrames[universe] = *currentData
+					copy(s.lastSentFrames[universe][:], currentData[:])
+				}
+			}
 
-					// On lance l'envoi dans une goroutine pour ne pas que l'envoi d'un paquet
-					// ne bloque l'envoi des autres paquets de la même trame.
-					go func(c *net.UDPConn, p []byte, u int) {
-						// Log final avant l'envoi réel sur le réseau.
-						log.Printf("ArtNet Sender: Envoi de l'univers %d (%s) avec %d octets.", u, c.RemoteAddr().String(), len(p))
-						// j'ai tout ignoré faudrait ajouter un log d'erreur mais j'voulais pas spam la console
-						_, _ = c.Write(p)
-					}(conn, packet, universe)
+			// 2. Maintenant, on envoie la liste de travail de manière étalée.
+			if len(packetsToSend) > 0 {
+				// Calculer la pause idéale entre chaque paquet pour étaler l'envoi
+				// sur environ 50% de notre budget temps (pour garder une marge).
+				// time.Duration est en nanosecondes.
+				pacingDuration := (tickDuration * 5 / 10) / time.Duration(len(packetsToSend))
+				
+				for _, p := range packetsToSend {
+					// Log final avant l'envoi réel sur le réseau.
+					log.Printf("ArtNet Sender: Envoi de l'univers %d (%s) avec %d octets.", p.uni, p.conn.RemoteAddr().String(), len(p.packet))
+					// j'ai tout ignoré faudrait ajouter un log d'erreur mais j'voulais pas spam la console
+					_, _ = p.conn.Write(p.packet)
+					
+					// On fait la pause.
+					time.Sleep(pacingDuration)
 				}
 			}
 		}
