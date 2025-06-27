@@ -20,7 +20,7 @@ func main() {
 
 	// --- ÉTAPE 1 : CHARGEMENT DE LA CONFIGURATION (UNE SEULE FOIS) ---
 	log.Println("Main: Chargement de la configuration depuis routing.csv...")
-	appConfig, err := config.Load("internal/config/routing.csv")
+	appConfig, err := config.Load("internal/config/routing.xlsx")
 	if err != nil {
 		// Si la config de base ne peut pas être chargée, l'application ne peut pas fonctionner.
 		// C'est une erreur fatale.
