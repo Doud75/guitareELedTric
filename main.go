@@ -2,21 +2,22 @@
 package main
 
 import (
-	"bufio"
-	"context"
-	"fmt"
-	"log"
-	"os"
-	"strings"
+    "context"
+    "log"
+    "bufio"
+    "fmt"
+    "os"
+    "strings"
 
-	app_ehub "guitarHetic/internal/application/ehub"
-	app_processor "guitarHetic/internal/application/processor"
-	"guitarHetic/internal/config"
-	domain_artnet "guitarHetic/internal/domain/artnet"
-	"guitarHetic/internal/domain/ehub"
-	infra_artnet "guitarHetic/internal/infrastructure/artnet"
-	infra_ehub "guitarHetic/internal/infrastructure/ehub"
-	"guitarHetic/internal/simulator"
+    app_ehub "guitarHetic/internal/application/ehub"
+    app_processor "guitarHetic/internal/application/processor"
+    "guitarHetic/internal/config"
+    domain_artnet "guitarHetic/internal/domain/artnet"
+    "guitarHetic/internal/domain/ehub"
+    infra_artnet "guitarHetic/internal/infrastructure/artnet"
+    infra_ehub "guitarHetic/internal/infrastructure/ehub"
+    "guitarHetic/internal/simulator"
+    "guitarHetic/internal/ui"
 )
 
 func main() {
@@ -32,7 +33,6 @@ func main() {
 	}
 	log.Println("Main: Configuration chargée avec succès.")
 
-
 	// --- ÉTAPE 2 : CRÉATION DES CANAUX DE COMMUNICATION (OPTIMISÉS) ---
 	rawPacketChannel := make(chan ehub.RawPacket, 1000)       // Augmenté pour éviter blocage UDP
 	configChannel := make(chan *ehub.EHubConfigMsg, 50)       // Augmenté mais reste petit (configs rares)
@@ -44,14 +44,14 @@ func main() {
 
 
 	// --- ÉTAPE 3 : CONSTRUCTION DES COMPOSANTS ---
-	
+
 	// a) Infrastructure (couche externe)
 	const eHubPort = 8765
 	listener, err := infra_ehub.NewListener(eHubPort, rawPacketChannel)
 	if err != nil {
 		log.Fatalf("Erreur Listener: %v", err)
 	}
-	
+
 	// Le Sender a besoin de la map des IPs des univers.
 	sender, err := infra_artnet.NewSender(appConfig.UniverseIP)
 	if err != nil {
@@ -61,7 +61,7 @@ func main() {
 	// b) Application (logique métier)
 	parser := app_ehub.NewParser()
 	eHubService := app_ehub.NewService(rawPacketChannel, parser, configChannel, updateChannel)
-	
+
 	// Le Processor nous donne un canal pour lui envoyer des configs plus tard.
 	processorService, physicalConfigOut := app_processor.NewService(configChannel, updateChannel, artnetQueue)
 
@@ -70,7 +70,7 @@ func main() {
 
 
 	// --- ÉTAPE 4 : DÉMARRAGE DES GOROUTINES ---
-	
+
 	listener.Start() // On ajoutera le contexte ici plus tard
 	eHubService.Start()
 	processorService.Start()
@@ -94,19 +94,19 @@ func main() {
 	log.Println("  stop    - Arrête l'animation")
 	log.Println("  quit    - Quitte le programme")
 	log.Println("===========================")
-	
+
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Print("faker> ")
 		if !scanner.Scan() {
 			break
 		}
-		
+
 		command := strings.TrimSpace(scanner.Text())
 		if command == "" {
 			continue
 		}
-		
+
 		switch command {
 		case "quit", "exit", "q":
 			log.Println("Arrêt du système...")
@@ -119,4 +119,7 @@ func main() {
 			faker.SendTestPattern(command)
 		}
 	}
+    ui.RunUI(ctx, appConfig)
+    cancel()
+    log.Println("Arrêt complet.")
 }
