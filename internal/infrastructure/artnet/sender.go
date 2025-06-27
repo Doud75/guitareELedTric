@@ -9,14 +9,17 @@ import (
 	"time"
 )
 
+
 const dmxDataSize = 512
 const tickDuration = 33 * time.Millisecond // 30 FPS la
+const refreshRate = 30 // 30 FPS
 
 type Sender struct {
 	conns       map[int]*net.UDPConn
 	headerCache map[int][]byte     
 	ticker      *time.Ticker 
-	lastSentFrames map[int]*[dmxDataSize]byte     
+	lastSentFrames map[int]*[dmxDataSize]byte 
+	refreshCounter int 
 }
 
 
@@ -78,20 +81,25 @@ func (s *Sender) Run(ctx context.Context, in <-chan domainArtnet.LEDMessage) {
 			*latestFrames[msg.Universe] = msg.Data
 
 		case <-s.ticker.C:
-			// --- DÉBUT DE LA LOGIQUE DE PACING ---
-			// 1. On identifie d'abord TOUS les paquets qu'on doit envoyer dans cette trame.
+
+			s.refreshCounter++
+
+			isForceRefresh := s.refreshCounter >= refreshRate
+			if isForceRefresh {
+				s.refreshCounter = 0
+			}
+
 			var packetsToSend []struct {
 				conn   *net.UDPConn
 				packet []byte
 				uni    int
 			}
 
-			// On parcourt tous les univers dont on connaît l'état le plus récent.
 			for universe, currentData := range latestFrames {
 				lastData, found := s.lastSentFrames[universe]
-
+				
 				// On envoie seulement si: c'est la première fois (!found) OU si les données ont changé.
-				if !found || !bytes.Equal(lastData[:], currentData[:]) {
+				if isForceRefresh || !found || !bytes.Equal(lastData[:], currentData[:]) {
 					conn, ok := s.conns[universe]
 					if !ok {
 						continue
@@ -119,13 +127,12 @@ func (s *Sender) Run(ctx context.Context, in <-chan domainArtnet.LEDMessage) {
 					copy(s.lastSentFrames[universe][:], currentData[:])
 				}
 			}
+			
 
 			// 2. Maintenant, on envoie la liste de travail de manière étalée.
 			if len(packetsToSend) > 0 {
-				// Calculer la pause idéale entre chaque paquet pour étaler l'envoi
-				// sur environ 50% de notre budget temps (pour garder une marge).
-				// time.Duration est en nanosecondes.
-				pacingDuration := (tickDuration * 5 / 10) / time.Duration(len(packetsToSend))
+				
+				pacingDuration := (6*time.Millisecond) / time.Duration(len(packetsToSend))
 				
 				for _, p := range packetsToSend {
 					// Log final avant l'envoi réel sur le réseau.
