@@ -1,7 +1,6 @@
 package artnet
 
 import (
-	"bytes"
 	"context"
 	domainArtnet "guitarHetic/internal/domain/artnet"
 	"log"
@@ -12,14 +11,12 @@ import (
 
 const dmxDataSize = 512
 const tickDuration = 33 * time.Millisecond // 30 FPS la
-const refreshRate = 30 // 30 FPS
 
 type Sender struct {
 	conns       map[int]*net.UDPConn
 	headerCache map[int][]byte     
 	ticker      *time.Ticker 
 	lastSentFrames map[int]*[dmxDataSize]byte 
-	refreshCounter int 
 }
 
 
@@ -51,127 +48,57 @@ func NewSender(universeIP map[int]string) (*Sender, error) {
 
 
 func (s *Sender) Run(ctx context.Context, in <-chan domainArtnet.LEDMessage) {
-	log.Println("ArtNet Sender: Démarrage de la goroutine d'envoi (optimisée avec Diffing).")
+	log.Println("ArtNet Sender: Démarrage de la goroutine d'envoi (TICKER + LAST FRAMES).")
 
-	// la on fait ce que Kevin a dit , on envoi pas les messages direct
-	// on fait un map pour stocker l'état le plus récent de chaque univers.
-	// La clé est le numéro de l'univers.
-	// La valeur est un POINTEUR vers le tableau de données.
+	// Map pour stocker la dernière frame de chaque univers
 	latestFrames := make(map[int]*[dmxDataSize]byte)
 
 	for {
 		select {
-
 		case <-ctx.Done():
 			s.Close()
 			log.Println("ArtNet Sender: Goroutine d'envoi terminée.")
 			return
 
-		// Événement on recoit un message dans depuis le processor (en gros ehub)
+		// Réception des messages: on stocke juste la dernière frame
 		case msg := <-in:
-
-			// On ne l'envoie PAS tout de suite.
-			// On met simplement à jour notre map
-			// du coup si y'a 10 messages pour l'univers 5 arrivent avant le prochain tick,
-			// bah on ne gardera que le 10ème, le plus récent.
-
 			if _, ok := latestFrames[msg.Universe]; !ok {
 				latestFrames[msg.Universe] = new([dmxDataSize]byte)
 			}
 			*latestFrames[msg.Universe] = msg.Data
 
+		// Envoi périodique à 30 FPS
 		case <-s.ticker.C:
+			packetCount := 0
 
-			s.refreshCounter++
-
-			isForceRefresh := s.refreshCounter >= refreshRate
-			if isForceRefresh {
-				s.refreshCounter = 0
-			}
-
-			var packetsToSend []struct {
-				conn   *net.UDPConn
-				packet []byte
-				uni    int
-			}
-
-			for universe, currentData := range latestFrames {
-				lastData, found := s.lastSentFrames[universe]
-				
-    dataHasChanged := !found || !bytes.Equal(lastData[:], currentData[:])
-
-				
-				// On envoie seulement si: c'est la première fois (!found) OU si les données ont changé.
-				if isForceRefresh || dataHasChanged {
-
-if dataHasChanged && !isForceRefresh && found {
-    // On cherche le premier octet qui diffère
-    diffIndex := -1
-    for i := 0; i < dmxDataSize; i++ {
-        if lastData[i] != currentData[i] {
-            diffIndex = i
-            break
-        }
-    }
-    
-    log.Printf("Diffing a échoué pour l'univers %d.", universe)
-    if diffIndex != -1 {
-        log.Printf("  -> Première différence trouvée à l'octet %d. Last: %d, Current: %d", 
-            diffIndex, lastData[diffIndex], currentData[diffIndex])
-    } else {
-        // Ce cas ne devrait JAMAIS arriver si bytes.Equal est false, mais c'est une sécurité.
-        log.Printf("  -> Mystère: bytes.Equal a échoué mais aucune différence n'a été trouvée manuellement.")
-    }
-
-}
-
-
-					
-					conn, ok := s.conns[universe]
-					if !ok {
-						continue
-					}
-					header, ok := s.headerCache[universe]
-					if !ok {
-						continue
-					}
-
-					packet := make([]byte, 18+dmxDataSize)
-					copy(packet[0:18], header)
-					copy(packet[18:], currentData[:])
-					
-					// Au lieu d'envoyer tout de suite, on ajoute le paquet à notre liste de travail.
-					packetsToSend = append(packetsToSend, struct {
-						conn   *net.UDPConn
-						packet []byte
-						uni    int
-					}{conn, packet, universe})
-
-					// On met à jour la mémoire tout de suite.
-					if !found {
-						s.lastSentFrames[universe] = new([dmxDataSize]byte)
-					}
-					copy(s.lastSentFrames[universe][:], currentData[:])
+			for universe, frameData := range latestFrames {
+				// Récupération de la connexion
+				conn, ok := s.conns[universe]
+				if !ok {
+					continue
 				}
-			}
-				if len(packetsToSend) > 10 { // Mettre un seuil pour ne pas spammer la console
-				log.Printf("ArtNet Sender: Préparation d'une rafale de %d paquets. (ForceRefresh: %v)", len(packetsToSend), isForceRefresh)
+
+				// Récupération de l'en-tête pré-calculé
+				header, ok := s.headerCache[universe]
+				if !ok {
+					continue
+				}
+
+				// Construction et envoi du paquet
+				packet := make([]byte, 18+dmxDataSize)
+				copy(packet[0:18], header)
+				copy(packet[18:], frameData[:])
+
+				_, err := conn.Write(packet)
+				if err != nil {
+					log.Printf("ArtNet Sender: Erreur envoi univers %d: %v", universe, err)
+				}
+				
+				packetCount++
 			}
 
-			// 2. Maintenant, on envoie la liste de travail de manière étalée.
-			if len(packetsToSend) > 0 {
-				
-				pacingDuration := (tickDuration*8/10) / time.Duration(len(packetsToSend))
-				
-				for _, p := range packetsToSend {
-					// Log final avant l'envoi réel sur le réseau.
-					// log.Printf("ArtNet Sender: Envoi de l'univers %d (%s) avec %d octets.", p.uni, p.conn.RemoteAddr().String(), len(p.packet))
-					// j'ai tout ignoré faudrait ajouter un log d'erreur mais j'voulais pas spam la console
-					_, _ = p.conn.Write(p.packet)
-					
-					// On fait la pause.
-					time.Sleep(pacingDuration)
-				}
+			if packetCount > 0 {
+				log.Printf("ArtNet Sender: Envoyé %d paquets à 30 FPS", packetCount)
 			}
 		}
 	}

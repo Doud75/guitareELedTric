@@ -5,7 +5,7 @@ import (
 	"context"
 	"log"
 	"time"
-	
+
 	app_ehub "guitarHetic/internal/application/ehub"
 	app_processor "guitarHetic/internal/application/processor"
 	"guitarHetic/internal/config"
@@ -29,11 +29,11 @@ func main() {
 	log.Println("Main: Configuration chargée avec succès.")
 
 
-	// --- ÉTAPE 2 : CRÉATION DES CANAUX DE COMMUNICATION ---
-	rawPacketChannel := make(chan ehub.RawPacket, 100)
-	configChannel := make(chan *ehub.EHubConfigMsg, 10)
-	updateChannel := make(chan *ehub.EHubUpdateMsg, 100)
-	artnetQueue := make(chan domain_artnet.LEDMessage, 500)
+	// --- ÉTAPE 2 : CRÉATION DES CANAUX DE COMMUNICATION (OPTIMISÉS) ---
+	rawPacketChannel := make(chan ehub.RawPacket, 1000)       // Augmenté pour éviter blocage UDP
+	configChannel := make(chan *ehub.EHubConfigMsg, 50)       // Augmenté mais reste petit (configs rares)
+	updateChannel := make(chan *ehub.EHubUpdateMsg, 1000)     // Augmenté pour 40 FPS
+	artnetQueue := make(chan domain_artnet.LEDMessage, 10000) // Déjà optimisé
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
