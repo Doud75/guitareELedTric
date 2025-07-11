@@ -16,16 +16,28 @@ func NewParser() *Parser {
 }
 
 func (p *Parser) Parse(packet []byte) (any, error) {
+	fmt.Printf("🔄 eHub PARSER: Tentative de parsing d'un paquet de %d bytes\n", len(packet))
+	
 	if len(packet) < 10 {
+		fmt.Printf("❌ eHub PARSER: Paquet trop petit (%d bytes)\n", len(packet))
 		return nil, fmt.Errorf("paquet trop petit pour être un message eHuB (taille: %d)", len(packet))
 	}
 
 	if string(packet[0:4]) != "eHuB" {
+		fmt.Printf("❌ eHub PARSER: Signature incorrecte: '%s'\n", string(packet[0:4]))
 		return nil, fmt.Errorf("signature 'eHuB' non trouvée")
 	}
 
 	messageType := packet[4] 
 	eHubUniverse := int(packet[5])
+	
+	// Log pour TOUS les univers pour voir ce qui passe
+	fmt.Printf("🌍 eHub PARSER: Univers %d, Type %d\n", eHubUniverse, messageType)
+	
+	// Log spécial pour les univers problématiques
+	if eHubUniverse == 13 || eHubUniverse == 18 {
+		fmt.Printf("🔍 eHub PARSER FOCUS: Univers %d, Type %d, Packet size: %d bytes\n", eHubUniverse, messageType, len(packet))
+	}
 	
 	compressedPayloadSize := binary.LittleEndian.Uint16(packet[8:10])
 	if int(compressedPayloadSize)+10 > len(packet) {
@@ -94,7 +106,43 @@ func (p *Parser) parseUpdatePayload(universe int, payload []byte) (*ehub.EHubUpd
 		entity.Green = colors[1]
 		entity.Blue = colors[2]
 		entity.White = colors[3]
+		
+		// Log spécialement pour les entités des bandes 13 et 18
+		if (entity.ID >= 1900 && entity.ID <= 2069) || (entity.ID >= 2670 && entity.ID <= 2758) {
+			bandeName := ""
+			if entity.ID >= 1900 && entity.ID <= 2069 {
+				bandeName = "BANDE 13"
+			} else {
+				bandeName = "BANDE 18"
+			}
+			fmt.Printf("🎯 %s: Entity %d -> R:%d G:%d B:%d W:%d (Univers eHub: %d)\n", 
+				bandeName, entity.ID, entity.Red, entity.Green, entity.Blue, entity.White, universe)
+		}
+		
 		entities = append(entities, entity)
+	}
+
+	// Log de synthèse pour les univers contenant les bandes problématiques
+	bande13Count := 0
+	bande18Count := 0
+	for _, entity := range entities {
+		if entity.ID >= 1900 && entity.ID <= 2069 {
+			bande13Count++
+		}
+		if entity.ID >= 2670 && entity.ID <= 2758 {
+			bande18Count++
+		}
+	}
+	
+	if bande13Count > 0 || bande18Count > 0 {
+		fmt.Printf("📊 eHub PARSER: Univers %d -> %d entités total", universe, len(entities))
+		if bande13Count > 0 {
+			fmt.Printf(", BANDE 13: %d entités", bande13Count)
+		}
+		if bande18Count > 0 {
+			fmt.Printf(", BANDE 18: %d entités", bande18Count)
+		}
+		fmt.Printf("\n")
 	}
 
 	return &ehub.EHubUpdateMsg{

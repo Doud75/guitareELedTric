@@ -2,6 +2,7 @@ package artnet
 
 import (
 	"context"
+	"fmt"
 	domainArtnet "guitarHetic/internal/domain/artnet"
 	"log"
 	"net"
@@ -66,6 +67,21 @@ func (s *Sender) Run(ctx context.Context, in <-chan domainArtnet.LEDMessage) {
 				latestFrames[msg.Universe] = new([dmxDataSize]byte)
 			}
 			*latestFrames[msg.Universe] = msg.Data
+			
+			// Log spécial pour les univers des bandes problématiques
+			if msg.Universe == 12 || msg.Universe == 17 {
+				bandeName := ""
+				if msg.Universe == 12 {
+					bandeName = "BANDE 13"
+				} else {
+					bandeName = "BANDE 18"
+				}
+				fmt.Printf("📥 ArtNet SENDER: Reçu données pour %s (Univers ArtNet %d) -> DMX[0-11]: [%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d]\n", 
+					bandeName, msg.Universe, 
+					msg.Data[0], msg.Data[1], msg.Data[2], msg.Data[3],
+					msg.Data[4], msg.Data[5], msg.Data[6], msg.Data[7],
+					msg.Data[8], msg.Data[9], msg.Data[10], msg.Data[11])
+			}
 
 		// Envoi périodique à 30 FPS
 		case <-s.ticker.C:
@@ -92,6 +108,21 @@ func (s *Sender) Run(ctx context.Context, in <-chan domainArtnet.LEDMessage) {
 				_, err := conn.Write(packet)
 				if err != nil {
 					log.Printf("ArtNet Sender: Erreur envoi univers %d: %v", universe, err)
+				} else {
+					// Log spécial pour les univers des bandes problématiques
+					if universe == 12 || universe == 17 {
+						bandeName := ""
+						if universe == 12 {
+							bandeName = "BANDE 13"
+						} else {
+							bandeName = "BANDE 18"
+						}
+						fmt.Printf("📤 ArtNet SENDER: Envoi %s (Univers %d) -> DMX[0-11]: [%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d]\n", 
+							bandeName, universe,
+							frameData[0], frameData[1], frameData[2], frameData[3],
+							frameData[4], frameData[5], frameData[6], frameData[7],
+							frameData[8], frameData[9], frameData[10], frameData[11])
+					}
 				}
 				
 				packetCount++

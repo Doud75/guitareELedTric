@@ -96,7 +96,7 @@ func (s *Service) Start() {
 					continue // On ne peut rien faire sans table de routage.
 				}
 
-				// --- OPTIMISATION #1: Utilisation du Pool de mémoire ---
+				// --- OPTIMISATION #1: Utilisation du Pool de mémoire + Persistance ---
 				// 1. On récupère une map pré-allouée du pool.
 				framesPtr := frameMapPool.Get().(*map[int]*[512]byte)
 				frames := *framesPtr
@@ -105,6 +105,15 @@ func (s *Service) Start() {
 				for k := range frames {
 					delete(frames, k)
 				}
+
+				// 3. 🔥 PERSISTANCE: Copier les frames persistantes comme base
+				s.framesMutex.RLock()
+				for universe, persistentFrame := range s.persistentFrames {
+					newFrame := new([512]byte)
+					copy(newFrame[:], persistentFrame[:])
+					frames[universe] = newFrame
+				}
+				s.framesMutex.RUnlock()
 
 				// Boucle principale de traitement des entités du message update.
 				for _, entity := range updateMsg.Entities {
@@ -137,16 +146,51 @@ func (s *Service) Start() {
 						}
 						
 						offset := routeInfo.DMXBufferOffset
-						if offset+2 < 512 { // Sécurité pour ne pas écrire en dehors du buffer.
+						if offset+2 < 512 { // RGB seulement (3 canaux) pour avoir 170 entités max (170*3=510)
 							targetFrame[offset+0] = entity.Red
 							targetFrame[offset+1] = entity.Green
 							targetFrame[offset+2] = entity.Blue
+							// On ignore délibérément entity.White car l'écran LED est RGB, pas RGBW
+							
+							// Log spécial pour les bandes problématiques
+							if entity.ID >= 1900 && entity.ID <= 2069 {
+								log.Printf("🔧 PROCESSOR BANDE 13: Entity %d -> DMX[%d:%d] = [%d,%d,%d] (W:%d ignoré)", 
+									entity.ID, offset, offset+2, entity.Red, entity.Green, entity.Blue, entity.White)
+							}
+							if entity.ID >= 2670 && entity.ID <= 2758 {
+								log.Printf("🔧 PROCESSOR BANDE 18: Entity %d -> DMX[%d:%d] = [%d,%d,%d] (W:%d ignoré)", 
+									entity.ID, offset, offset+2, entity.Red, entity.Green, entity.Blue, entity.White)
+							}
 						}
 					}
 				}
 
+				// 🔥 PERSISTANCE: Sauvegarder les frames pour la prochaine fois
+				s.framesMutex.Lock()
+				for universe, frameData := range frames {
+					if s.persistentFrames[universe] == nil {
+						s.persistentFrames[universe] = new([512]byte)
+					}
+					copy(s.persistentFrames[universe][:], frameData[:])
+				}
+				s.framesMutex.Unlock()
+
 				// On envoie tous les buffers DMX construits au Sender.
 				for u, data := range frames {
+					// Log spécial pour les univers des bandes problématiques
+					if u == 12 || u == 17 {
+						bandeName := ""
+						if u == 12 {
+							bandeName = "BANDE 13"
+						} else {
+							bandeName = "BANDE 18"
+						}
+						log.Printf("📤 PROCESSOR: Envoi %s (Univers %d) -> DMX[0-11]: [%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d]", 
+							bandeName, u,
+							data[0], data[1], data[2], data[3], data[4], data[5],
+							data[6], data[7], data[8], data[9], data[10], data[11])
+					}
+					
 					s.dest <- artnet.LEDMessage{Universe: u, Data: *data}
 				}
 
