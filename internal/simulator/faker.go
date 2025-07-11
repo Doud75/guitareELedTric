@@ -2,11 +2,15 @@
 package simulator
 
 import (
+	"bufio"
+	"fmt"
 	"guitarHetic/internal/config"
 	"guitarHetic/internal/domain/ehub"
 	"log"
 	"math"
+	"os"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -14,19 +18,18 @@ type Faker struct {
 	updateOut    chan<- *ehub.EHubUpdateMsg
 	configOut    chan<- *ehub.EHubConfigMsg
 	config       *config.Config
-	allEntityIDs []int // Liste de TOUTES les entités de l'installation
+	allEntityIDs []uint16 // Changed to uint16 to match EHubEntityState
 	active       bool
 }
 
 func NewFaker(updateOut chan<- *ehub.EHubUpdateMsg, configOut chan<- *ehub.EHubConfigMsg, cfg *config.Config) *Faker {
-	// ✅ Extraction de TOUTES les entités de la config
-	var entityIDs []int
+	var entityIDs []uint16
 	for _, entry := range cfg.RoutingTable {
-		entityIDs = append(entityIDs, entry.EntityID)
+		entityIDs = append(entityIDs, uint16(entry.EntityID))
 	}
-	sort.Ints(entityIDs) // Tri pour les patterns séquentiels
+	sort.Slice(entityIDs, func(i, j int) bool { return entityIDs[i] < entityIDs[j] })
 
-	log.Printf("Faker: Trouvé %d entités dans la configuration", len(entityIDs))
+	log.Printf("Faker: Initialized with %d entities.", len(entityIDs))
 
 	return &Faker{
 		updateOut:    updateOut,
@@ -37,27 +40,47 @@ func NewFaker(updateOut chan<- *ehub.EHubUpdateMsg, configOut chan<- *ehub.EHubC
 	}
 }
 
-// ✅ Pattern universel : Toutes les entités d'une couleur
-func (f *Faker) SendSolidColor(r, g, b byte) {
-	log.Printf("Faker: Envoi couleur unie RGB(%d,%d,%d) sur %d entités", r, g, b, len(f.allEntityIDs))
+// StartInteractive a blocking method to read commands from stdin.
+func (f *Faker) StartInteractive() {
+	reader := bufio.NewReader(os.Stdin)
+	f.ShowHelp()
+	for {
+		fmt.Print("faker> ")
+		input, _ := reader.ReadString('\n')
+		command := strings.TrimSpace(input)
 
+		if command == "" {
+			continue
+		}
+
+		if command == "exit" {
+			log.Println("Faker: Exiting interactive mode.")
+			break
+		}
+
+		f.SendTestPattern(command)
+	}
+}
+
+// SendSolidColor sends a solid color to all entities.
+func (f *Faker) SendSolidColor(r, g, b, w byte) {
 	var entities []ehub.EHubEntityState
 	for _, entityID := range f.allEntityIDs {
 		entities = append(entities, ehub.EHubEntityState{
-			ID:    uint16(entityID),
+			ID:    entityID,
 			Red:   r,
 			Green: g,
 			Blue:  b,
-			White: 0,
+			White: w,
 		})
 	}
 
 	f.sendConfigAndUpdate(entities)
 }
 
-// ✅ Pattern universel : Gradient par EntityID
+// SendGradient sends a gradient across all entities.
 func (f *Faker) SendGradient(startR, startG, startB, endR, endG, endB byte) {
-	log.Printf("Faker: Envoi gradient sur %d entités", len(f.allEntityIDs))
+
 
 	var entities []ehub.EHubEntityState
 	totalEntities := len(f.allEntityIDs)
@@ -71,7 +94,7 @@ func (f *Faker) SendGradient(startR, startG, startB, endR, endG, endB byte) {
 		b := byte(float64(startB) + progress*float64(int(endB)-int(startB)))
 
 		entities = append(entities, ehub.EHubEntityState{
-			ID:    uint16(entityID),
+			ID:    entityID,
 			Red:   r,
 			Green: g,
 			Blue:  b,
@@ -82,33 +105,30 @@ func (f *Faker) SendGradient(startR, startG, startB, endR, endG, endB byte) {
 	f.sendConfigAndUpdate(entities)
 }
 
-// ✅ Pattern universel : Sous-ensemble par pourcentage
+// SendPartialPattern sends a color to a percentage of entities.
 func (f *Faker) SendPartialPattern(percentage float64, r, g, b byte) {
 	if percentage < 0 || percentage > 1 {
-		log.Printf("Faker: Pourcentage invalide: %.2f", percentage)
+		fmt.Printf("Invalid percentage: %.2f\n", percentage)
 		return
 	}
 
 	count := int(float64(len(f.allEntityIDs)) * percentage)
-	log.Printf("Faker: Envoi sur %d entités (%.1f%% de %d)", count, percentage*100, len(f.allEntityIDs))
+	fmt.Printf("Sending pattern to %d entities (%.1f%% of %d)\n", count, percentage*100, len(f.allEntityIDs))
 
 	var entities []ehub.EHubEntityState
 
-	// Les autres en noir
 	for i, entityID := range f.allEntityIDs {
 		if i < count {
-			// Entités colorées
 			entities = append(entities, ehub.EHubEntityState{
-				ID:    uint16(entityID),
+				ID:    entityID,
 				Red:   r,
 				Green: g,
 				Blue:  b,
 				White: 0,
 			})
 		} else {
-			// Entités noires
 			entities = append(entities, ehub.EHubEntityState{
-				ID:    uint16(entityID),
+				ID:    entityID,
 				Red:   0,
 				Green: 0,
 				Blue:  0,
@@ -120,9 +140,9 @@ func (f *Faker) SendPartialPattern(percentage float64, r, g, b byte) {
 	f.sendConfigAndUpdate(entities)
 }
 
-// ✅ Pattern universel : Vague qui se propage
+// SendWavePattern sends a wave of color.
 func (f *Faker) SendWavePattern(wavePosition float64, waveWidth float64, r, g, b byte) {
-	log.Printf("Faker: Envoi vague position %.2f, largeur %.2f", wavePosition, waveWidth)
+
 
 	var entities []ehub.EHubEntityState
 	totalEntities := len(f.allEntityIDs)
@@ -143,7 +163,7 @@ func (f *Faker) SendWavePattern(wavePosition float64, waveWidth float64, r, g, b
 		}
 
 		entities = append(entities, ehub.EHubEntityState{
-			ID:    uint16(entityID),
+			ID:    entityID,
 			Red:   byte(float64(r) * intensity),
 			Green: byte(float64(g) * intensity),
 			Blue:  byte(float64(b) * intensity),
@@ -154,34 +174,42 @@ func (f *Faker) SendWavePattern(wavePosition float64, waveWidth float64, r, g, b
 	f.sendConfigAndUpdate(entities)
 }
 
-// ✅ Pattern universel : Animation continue
+// StartWaveAnimation starts a continuous wave animation.
 func (f *Faker) StartWaveAnimation() {
+	if f.active {
+		fmt.Println("Animation is already running.")
+		return
+	}
 	f.active = true
 	go func() {
-		// Envoyer la config une fois
 		f.sendInitialConfig()
 
 		ticker := time.NewTicker(50 * time.Millisecond) // 20 FPS
 		defer ticker.Stop()
 
 		position := 0.0
-		direction := 0.02 // Vitesse de la vague
+		direction := 0.02
 
 		for f.active {
-			<-ticker.C
-			f.SendWavePattern(position, 0.2, 255, 100, 0) // Vague orange
+			select {
+			case <-ticker.C:
+				f.SendWavePattern(position, 0.2, 255, 100, 0)
 
-			position += direction
-			if position >= 1.0 {
-				position = 0.0 // Recommence
+				position += direction
+				if position >= 1.0 {
+					position = 0.0
+				}
+			default:
+				// Allows the loop to exit if f.active becomes false
+				time.Sleep(10 * time.Millisecond)
 			}
 		}
 	}()
 
-	log.Println("Faker: Animation vague démarrée")
+	fmt.Println("Wave animation started. Type 'stop' to end.")
 }
 
-// ✅ Méthodes d'aide
+// sendConfigAndUpdate sends the configuration and then the entity states.
 func (f *Faker) sendConfigAndUpdate(entities []ehub.EHubEntityState) {
 	f.sendInitialConfig()
 
@@ -203,9 +231,9 @@ func (f *Faker) sendInitialConfig() {
 		Ranges: []ehub.EHubConfigRange{
 			{
 				SextuorStart: 0,
-				EntityStart:  uint16(f.allEntityIDs[0]),
+				EntityStart:  f.allEntityIDs[0],
 				SextuorEnd:   uint16(len(f.allEntityIDs) - 1),
-				EntityEnd:    uint16(f.allEntityIDs[len(f.allEntityIDs)-1]),
+				EntityEnd:    f.allEntityIDs[len(f.allEntityIDs)-1],
 			},
 		},
 	}
@@ -213,65 +241,70 @@ func (f *Faker) sendInitialConfig() {
 	f.configOut <- configMsg
 }
 
+// Stop stops any active animation.
 func (f *Faker) Stop() {
-	f.active = false
-	log.Println("Faker: Arrêté")
+	if f.active {
+		f.active = false
+		fmt.Println("Animation stopped.")
+	} else {
+		fmt.Println("No animation is currently running.")
+	}
 }
 
-// ✅ Interface simple pour tous types d'installations
+// SendTestPattern interprets a string command to generate a pattern.
 func (f *Faker) SendTestPattern(pattern string) {
 	switch pattern {
 	case "white":
-		f.SendSolidColor(255, 255, 255)
+		f.SendSolidColor(255, 255, 255, 0)
+	case "pure-white":
+		f.SendSolidColor(0, 0, 0, 255)
 	case "red":
-		f.SendSolidColor(255, 0, 0)
-	log.Println("  white, red, green, blue, yellow, cyan, magenta, black")
-	log.Println("Gradients:")
-	log.Println("  gradient, gradient-rainbow")
-	log.Println("Patterns partiels:")
-	log.Println("  half (50%), quarter (25%), three-quarter (75%)")
-	log.Println("Vagues:")
-	log.Println("  wave, wave-blue")
-		f.SendSolidColor(0, 255, 255)
+		f.SendSolidColor(255, 0, 0, 0)
+	case "green":
+		f.SendSolidColor(0, 255, 0, 0)
+	case "blue":
+		f.SendSolidColor(0, 0, 255, 0)
+	case "yellow":
+		f.SendSolidColor(255, 255, 0, 0)
+	case "cyan":
+		f.SendSolidColor(0, 255, 255, 0)
 	case "magenta":
-		f.SendSolidColor(255, 0, 255)
-	case "black":
-		f.SendSolidColor(0, 0, 0)
+		f.SendSolidColor(255, 0, 255, 0)
+	case "black", "off":
+		f.SendSolidColor(0, 0, 0, 0)
 	case "gradient":
-		f.SendGradient(255, 0, 0, 0, 0, 255) // Rouge vers bleu
+		f.SendGradient(255, 0, 0, 0, 0, 255) // Red to Blue
 	case "gradient-rainbow":
-		f.SendGradient(255, 0, 0, 255, 255, 0) // Rouge vers jaune
+		f.SendGradient(255, 0, 0, 255, 255, 0) // Red to Yellow
 	case "half":
-		f.SendPartialPattern(0.5, 255, 255, 0) // 50% jaune
+		f.SendPartialPattern(0.5, 255, 255, 0) // 50% Yellow
 	case "quarter":
-		f.SendPartialPattern(0.25, 0, 255, 255) // 25% cyan
+		f.SendPartialPattern(0.25, 0, 255, 255) // 25% Cyan
 	case "three-quarter":
-		f.SendPartialPattern(0.75, 255, 0, 255) // 75% magenta
+		f.SendPartialPattern(0.75, 255, 0, 255) // 75% Magenta
 	case "wave":
-		f.SendWavePattern(0.5, 0.3, 255, 100, 0) // Vague au centre
+		f.SendWavePattern(0.5, 0.3, 255, 100, 0) // Wave in the middle
 	case "wave-blue":
-		f.SendWavePattern(0.3, 0.2, 0, 100, 255) // Vague bleue
+		f.SendWavePattern(0.3, 0.2, 0, 100, 255) // Blue wave
 	case "animation":
 		f.StartWaveAnimation()
 	case "stop":
 		f.Stop()
-	default:
-		log.Printf("Faker: Pattern '%s' non reconnu", pattern)
+	case "help":
 		f.ShowHelp()
+	default:
+		fmt.Printf("Unknown pattern '%s'. Type 'help' for a list of commands.\n", pattern)
 	}
 }
 
+// ShowHelp displays available commands.
 func (f *Faker) ShowHelp() {
-	log.Println("=== FAKER - PATTERNS DISPONIBLES ===")
-	log.Println("Couleurs unies:")
-	log.Println("  white, red, green, blue, yellow, cyan, magenta, black")
-	log.Println("Gradients:")
-	log.Println("  gradient, gradient-rainbow")
-	log.Println("Patterns partiels:")
-	log.Println("  half (50%), quarter (25%), three-quarter (75%)")
-	log.Println("Vagues:")
-	log.Println("  wave, wave-blue")
-	log.Println("Animations:")
-	log.Println("  animation (démarre), stop (arrête)")
-	log.Println("=====================================")
+	fmt.Println("=== Faker Commands ===")
+	fmt.Println("Solid Colors: white, pure-white, red, green, blue, yellow, cyan, magenta, black/off")
+	fmt.Println("Gradients:    gradient, gradient-rainbow")
+	fmt.Println("Patterns:     half, quarter, three-quarter")
+	fmt.Println("Waves:        wave, wave-blue")
+	fmt.Println("Animations:   animation (start), stop (end)")
+	fmt.Println("Other:        help (show this message), exit (quit)")
+	fmt.Println("====================")
 }

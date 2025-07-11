@@ -40,33 +40,11 @@ func (s *Service) Start() {
 			
 			switch msg := parsedMessage.(type) {
 			case *ehub.EHubConfigMsg:
-				if msg.Universe == 13 || msg.Universe == 18 {
-					log.Printf("📤 eHub SERVICE: Config pour univers %d", msg.Universe)
-				}
+				// Logs supprimés pour interface propre
 				s.configOut <- msg
 				
 			case *ehub.EHubUpdateMsg:
-				// Compter les entités des bandes problématiques
-				bande13Count := 0
-				bande18Count := 0
-				for _, entity := range msg.Entities {
-					if entity.ID >= 1900 && entity.ID <= 2069 {
-						bande13Count++
-					}
-					if entity.ID >= 2670 && entity.ID <= 2758 {
-						bande18Count++
-					}
-				}
-				
-				if bande13Count > 0 || bande18Count > 0 {
-					log.Printf("📤 eHub SERVICE: Univers %d avec %d entités total", msg.Universe, len(msg.Entities))
-					if bande13Count > 0 {
-						log.Printf("   → BANDE 13: %d entités (1900-2069)", bande13Count)
-					}
-					if bande18Count > 0 {
-						log.Printf("   → BANDE 18: %d entités (2670-2758)", bande18Count)
-					}
-				}
+				// Logs supprimés pour interface propre
 				
    				s.updateOut <- msg
 			default:

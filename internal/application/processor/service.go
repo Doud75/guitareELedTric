@@ -151,16 +151,6 @@ func (s *Service) Start() {
 							targetFrame[offset+1] = entity.Green
 							targetFrame[offset+2] = entity.Blue
 							// On ignore délibérément entity.White car l'écran LED est RGB, pas RGBW
-							
-							// Log spécial pour les bandes problématiques
-							if entity.ID >= 1900 && entity.ID <= 2069 {
-								log.Printf("🔧 PROCESSOR BANDE 13: Entity %d -> DMX[%d:%d] = [%d,%d,%d] (W:%d ignoré)", 
-									entity.ID, offset, offset+2, entity.Red, entity.Green, entity.Blue, entity.White)
-							}
-							if entity.ID >= 2670 && entity.ID <= 2758 {
-								log.Printf("🔧 PROCESSOR BANDE 18: Entity %d -> DMX[%d:%d] = [%d,%d,%d] (W:%d ignoré)", 
-									entity.ID, offset, offset+2, entity.Red, entity.Green, entity.Blue, entity.White)
-							}
 						}
 					}
 				}
@@ -177,20 +167,6 @@ func (s *Service) Start() {
 
 				// On envoie tous les buffers DMX construits au Sender.
 				for u, data := range frames {
-					// Log spécial pour les univers des bandes problématiques
-					if u == 12 || u == 17 {
-						bandeName := ""
-						if u == 12 {
-							bandeName = "BANDE 13"
-						} else {
-							bandeName = "BANDE 18"
-						}
-						log.Printf("📤 PROCESSOR: Envoi %s (Univers %d) -> DMX[0-11]: [%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d]", 
-							bandeName, u,
-							data[0], data[1], data[2], data[3], data[4], data[5],
-							data[6], data[7], data[8], data[9], data[10], data[11])
-					}
-					
 					s.dest <- artnet.LEDMessage{Universe: u, Data: *data}
 				}
 
