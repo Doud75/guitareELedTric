@@ -7,18 +7,7 @@ import (
 	"fmt"
 	"guitarHetic/internal/domain/ehub"
 	"io"
-	"sync"
 )
-
-// Pool global de lecteurs GZIP pour éviter les allocations coûteuses
-var gzipReaderPool = sync.Pool{
-	New: func() interface{} {
-		// Créé un reader fonctionnel avec données bidon
-		reader, _ := gzip.NewReader(bytes.NewReader(nil))
-		return reader
-	},
-}
-
 
 type Parser struct{}
 
@@ -45,16 +34,14 @@ func (p *Parser) Parse(packet []byte) (any, error) {
 	
 	compressedPayload := packet[10 : 10+compressedPayloadSize]
 
-	// ✅ OPTIMISÉ : Réutilisation du lecteur GZIP depuis le pool
-	gzipReader := gzipReaderPool.Get().(*gzip.Reader)
-	defer gzipReaderPool.Put(gzipReader) // Remise dans le pool
-	
-	// Reset pour le nouveau payload (très rapide comparé à NewReader)
-	err := gzipReader.Reset(bytes.NewReader(compressedPayload))
+	// Création d'un nouveau lecteur gzip pour chaque décompression
+	// Cette approche est plus sûre que l'utilisation d'un pool
+	gzipReader, err := gzip.NewReader(bytes.NewReader(compressedPayload))
 	if err != nil {
-		return nil, fmt.Errorf("impossible de reset le lecteur gzip: %w", err)
+		return nil, fmt.Errorf("impossible de créer le lecteur gzip: %w", err)
 	}
-
+	defer gzipReader.Close() // Important : fermer le lecteur
+	
 	payload, err := io.ReadAll(gzipReader)
 	if err != nil {
 		return nil, fmt.Errorf("impossible de décompresser le payload: %w", err)

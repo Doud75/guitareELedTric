@@ -2,9 +2,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"log"
-	"time"
+	"os"
+	"strings"
 
 	app_ehub "guitarHetic/internal/application/ehub"
 	app_processor "guitarHetic/internal/application/processor"
@@ -13,6 +16,7 @@ import (
 	"guitarHetic/internal/domain/ehub"
 	infra_artnet "guitarHetic/internal/infrastructure/artnet"
 	infra_ehub "guitarHetic/internal/infrastructure/ehub"
+	"guitarHetic/internal/simulator"
 )
 
 func main() {
@@ -61,6 +65,9 @@ func main() {
 	// Le Processor nous donne un canal pour lui envoyer des configs plus tard.
 	processorService, physicalConfigOut := app_processor.NewService(configChannel, updateChannel, artnetQueue)
 
+	// c) Faker pour tests (E10)
+	faker := simulator.NewFaker(updateChannel, configChannel, appConfig)
+
 
 	// --- ÉTAPE 4 : DÉMARRAGE DES GOROUTINES ---
 	
@@ -76,9 +83,42 @@ func main() {
 	physicalConfigOut <- appConfig
 
 
-	// --- ÉTAPE 6 : ATTENTE ---
-	log.Println("Système entièrement démarré. En attente de données eHuB de Unity...")
+	// --- ÉTAPE 6 : ATTENTE AVEC INTERFACE FAKER ---
+	log.Println("Système entièrement démarré.")
+	log.Println("=== FAKER ACTIVÉ (E10) ===")
+	log.Println("Commandes disponibles :")
+	log.Println("  help    - Affiche l'aide complète")
+	log.Println("  white   - Écran blanc")
+	log.Println("  red     - Écran rouge")
+	log.Println("  blue    - Écran bleu")
+	log.Println("  wave    - Vague statique")
+	log.Println("  animation - Animation de vague")
+	log.Println("  stop    - Arrête l'animation")
+	log.Println("  quit    - Quitte le programme")
+	log.Println("===========================")
+	
+	scanner := bufio.NewScanner(os.Stdin)
 	for {
-		time.Sleep(1 * time.Hour)
+		fmt.Print("faker> ")
+		if !scanner.Scan() {
+			break
+		}
+		
+		command := strings.TrimSpace(scanner.Text())
+		if command == "" {
+			continue
+		}
+		
+		switch command {
+		case "quit", "exit", "q":
+			log.Println("Arrêt du système...")
+			faker.Stop()
+			cancel()
+			return
+		case "help":
+			faker.ShowHelp()
+		default:
+			faker.SendTestPattern(command)
+		}
 	}
 }

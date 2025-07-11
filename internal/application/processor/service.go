@@ -41,6 +41,9 @@ type Service struct {
 	routingTable       []FinalRouteInfo
 	lastUsedConfigMsg  *ehub.EHubConfigMsg
 	lastPhysicalConfig *config.Config
+	// 🔥 NOUVEAU: Frame persistence - garde la dernière frame connue de chaque univers
+	persistentFrames   map[int]*[512]byte
+	framesMutex        sync.RWMutex // Protection pour l'accès concurrent aux frames persistantes
 }
 
 // NewService construit une nouvelle instance du service de processeur.
@@ -57,6 +60,7 @@ func NewService(
 		updateMsgIn:      updateMsgIn,
 		PhysicalConfigIn: physicalConfigChan,
 		dest:             dest,
+		persistentFrames: make(map[int]*[512]byte), // 🔥 NOUVEAU: Initialisation des frames persistantes
 	}, physicalConfigChan
 }
 
