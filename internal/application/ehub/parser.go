@@ -9,7 +9,6 @@ import (
 	"io"
 )
 
-
 type Parser struct{}
 
 func NewParser() *Parser {
@@ -17,6 +16,8 @@ func NewParser() *Parser {
 }
 
 func (p *Parser) Parse(packet []byte) (any, error) {
+	// Logs supprimés pour interface propre
+	
 	if len(packet) < 10 {
 		return nil, fmt.Errorf("paquet trop petit pour être un message eHuB (taille: %d)", len(packet))
 	}
@@ -28,6 +29,8 @@ func (p *Parser) Parse(packet []byte) (any, error) {
 	messageType := packet[4] 
 	eHubUniverse := int(packet[5])
 	
+	// Logs supprimés pour interface propre
+	
 	compressedPayloadSize := binary.LittleEndian.Uint16(packet[8:10])
 	if int(compressedPayloadSize)+10 > len(packet) {
 		return nil, fmt.Errorf("taille de payload incohérente")
@@ -35,13 +38,14 @@ func (p *Parser) Parse(packet []byte) (any, error) {
 	
 	compressedPayload := packet[10 : 10+compressedPayloadSize]
 
-	// Unzip stage
+	// Création d'un nouveau lecteur gzip pour chaque décompression
+	// Cette approche est plus sûre que l'utilisation d'un pool
 	gzipReader, err := gzip.NewReader(bytes.NewReader(compressedPayload))
 	if err != nil {
 		return nil, fmt.Errorf("impossible de créer le lecteur gzip: %w", err)
 	}
-	defer gzipReader.Close()
-
+	defer gzipReader.Close() // Important : fermer le lecteur
+	
 	payload, err := io.ReadAll(gzipReader)
 	if err != nil {
 		return nil, fmt.Errorf("impossible de décompresser le payload: %w", err)
@@ -94,8 +98,13 @@ func (p *Parser) parseUpdatePayload(universe int, payload []byte) (*ehub.EHubUpd
 		entity.Green = colors[1]
 		entity.Blue = colors[2]
 		entity.White = colors[3]
+		
+		// Logs supprimés pour interface propre
+		
 		entities = append(entities, entity)
 	}
+
+	// Logs supprimés pour interface propre
 
 	return &ehub.EHubUpdateMsg{
 		Universe: universe,

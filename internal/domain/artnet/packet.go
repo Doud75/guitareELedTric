@@ -1,18 +1,17 @@
 package artnet
+import 	"encoding/binary" // On a besoin de cet outil pour écrire les en-têtes proprement
 
-func Build(universe int, data [512]byte) []byte {
-    packet := make([]byte, 18+512)
-    copy(packet[0:], []byte("Art-Net\x00"))
-    packet[8] = 0x00
-    packet[9] = 0x50
-    packet[10] = 0x00
-    packet[11] = 14
-    packet[12] = 0x00
-    packet[13] = 0x00
-    packet[14] = byte(universe & 0xFF)
-    packet[15] = byte((universe >> 8) & 0xFF)
-    packet[16] = byte(512 >> 8)
-    packet[17] = byte(512 & 0xFF)
-    copy(packet[18:], data[:])
-    return packet
+
+// buildArtNetHeader est une fonction privée qui construit un en-tête une seule fois.
+// Elle est appelée par le constructeur.
+func BuildArtNetHeader(universe int) []byte {
+	header := make([]byte, 18)
+	copy(header[0:8], []byte("Art-Net\x00"))          // Signature
+	binary.LittleEndian.PutUint16(header[8:10], 0x5000) // OpCode ArtDmx
+	binary.BigEndian.PutUint16(header[10:12], 14)       // Version du protocole
+	header[12] = 0                                     // Sequence (non utilisé)
+	header[13] = 0                                     // Physical Port (non utilisé)
+	binary.LittleEndian.PutUint16(header[14:16], uint16(universe)) // Le numéro d'univers
+	binary.BigEndian.PutUint16(header[16:18], 512) // La longueur des données
+	return header
 }
