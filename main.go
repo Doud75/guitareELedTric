@@ -28,7 +28,7 @@ func main() {
 	if err != nil {
 		// Si la config de base ne peut pas être chargée, l'application ne peut pas fonctionner.
 		// C'est une erreur fatale.
-		log.Fatalf("Erreur fatale: Impossible de charger routing.csv: %v", err)
+		log.Fatalf("Erreur fatale: Impossible de charger routing.xlsx: %v", err)
 	}
 	log.Println("Main: Configuration chargée avec succès.")
 
