@@ -3,11 +3,10 @@ package ui
 
 import (
     "fmt"
-    "strings"
-
     "fyne.io/fyne/v2"
     "fyne.io/fyne/v2/container"
     "fyne.io/fyne/v2/widget"
+    "strings"
 )
 
 // buildIPListView construit la page affichant la liste des contrôleurs.

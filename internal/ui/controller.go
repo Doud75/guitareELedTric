@@ -1,7 +1,9 @@
 package ui
 
 import (
+    "fyne.io/fyne/v2"
     "guitarHetic/internal/config"
+    "guitarHetic/internal/simulator"
     "log"
     "net"
     "sort"
@@ -13,14 +15,18 @@ type UIController struct {
     onStateChange     func()
     currentConfig     *config.Config        // Garde une référence à la config actuelle pour la copier
     physicalConfigOut chan<- *config.Config // Le canal pour envoyer la config mise à jour
+    app               fyne.App
+    faker             *simulator.Faker
 }
 
-func NewUIController(state *UIState, initialConfig *config.Config, cfgOut chan<- *config.Config) *UIController {
+func NewUIController(state *UIState, initialConfig *config.Config, cfgOut chan<- *config.Config, app fyne.App, faker *simulator.Faker) *UIController {
     return &UIController{
         state:             state,
         onStateChange:     func() {},
         currentConfig:     initialConfig,
         physicalConfigOut: cfgOut,
+        app:               app,
+        faker:             faker,
     }
 }
 
@@ -63,6 +69,24 @@ func (c *UIController) GoBackToIPList() {
 
     // 2. Notifier l'interface de se redessiner.
     c.onStateChange()
+}
+
+// --- ACTIONS DU MENU ---
+
+// QuitApp gère l'action de quitter proprement.
+func (c *UIController) QuitApp() {
+    if c.faker != nil {
+        c.faker.Stop() // Arrêter les animations du faker avant de quitter.
+    }
+    c.app.Quit()
+}
+
+// RunFakerCommand exécute une commande de test via le Faker.
+func (c *UIController) RunFakerCommand(command string) {
+    if c.faker != nil {
+        // Lancer dans une goroutine pour ne pas bloquer l'UI.
+        go c.faker.SendTestPattern(command)
+    }
 }
 
 func deepCopyConfig(original *config.Config) *config.Config {

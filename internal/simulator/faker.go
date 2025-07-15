@@ -259,13 +259,13 @@ func (f *Faker) SendTestPattern(pattern string) {
 	case "pure-white":
 		f.SendSolidColor(0, 0, 0, 255)
 	case "red":
-		f.SendSolidColor(255, 0, 0, 0)
+		f.SendSolidColor(30, 0, 0, 0)
 	case "green":
-		f.SendSolidColor(0, 255, 0, 0)
+		f.SendSolidColor(0, 30, 0, 0)
 	case "blue":
-		f.SendSolidColor(0, 0, 255, 0)
+		f.SendSolidColor(0, 0, 30, 0)
 	case "yellow":
-		f.SendSolidColor(255, 255, 0, 0)
+		f.SendSolidColor(30, 30, 0, 0)
 	case "cyan":
 		f.SendSolidColor(0, 255, 255, 0)
 	case "magenta":
