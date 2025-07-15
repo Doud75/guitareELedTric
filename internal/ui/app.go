@@ -4,6 +4,7 @@ package ui
 import (
     "fyne.io/fyne/v2"
     "fyne.io/fyne/v2/app"
+    "fyne.io/fyne/v2/container"
     "fyne.io/fyne/v2/widget"
     "guitarHetic/internal/config"
     "guitarHetic/internal/simulator"
@@ -12,21 +13,18 @@ import (
 // RunUI initialise et lance l'application graphique.
 func RunUI(cfg *config.Config, physicalConfigOut chan<- *config.Config, faker *simulator.Faker) {
     a := app.New()
-    w := a.NewWindow("Inspecteur de Contrôleurs ArtNet")
+    a.Settings().SetTheme(&ArtHeticTheme{})
+    w := a.NewWindow("Guitare Hetic - Inspecteur ArtNet")
 
-    // 1. Créer le modèle d'état et le contrôleur.
     state := NewUIState(cfg)
     controller := NewUIController(state, cfg, physicalConfigOut, a, faker)
 
-    // 2. Construire le menu principal.
     mainMenu := buildMainMenu(controller)
     w.SetMainMenu(mainMenu)
 
-    // 3. Définir la fonction de routage qui reconstruit l'interface.
     buildAndUpdateView := func() {
         var viewContent fyne.CanvasObject
 
-        // Ce routeur simple choisit quelle vue construire en fonction de l'état.
         switch state.CurrentView {
         case IPListView:
             viewContent = buildIPListView(state, controller)
@@ -36,17 +34,21 @@ func RunUI(cfg *config.Config, physicalConfigOut chan<- *config.Config, faker *s
             viewContent = widget.NewLabel("Erreur : Vue inconnue")
         }
 
-        w.SetContent(viewContent)
+        // *** CORRECTION CRUCIALE : On réintroduit le Header ***
+        // On crée une coquille d'application qui place notre contenu de vue
+        // sous une barre de navigation persistante.
+        header := buildHeader(state, controller)
+
+        // Le contenu principal est placé sous le header.
+        fullContent := container.NewBorder(header, nil, nil, nil, viewContent)
+
+        w.SetContent(fullContent)
     }
 
-    // 4. Connecter le contrôleur à la fonction de mise à jour.
     controller.SetUpdateCallback(buildAndUpdateView)
-
-    // 5. Construire la vue initiale.
     buildAndUpdateView()
 
     w.Resize(fyne.NewSize(800, 600))
-    // S'assurer que cliquer sur la croix de la fenêtre appelle notre logique de "quit".
     w.SetCloseIntercept(func() {
         controller.QuitApp()
     })

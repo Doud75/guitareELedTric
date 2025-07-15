@@ -1,86 +1,142 @@
-// internal/ui/views.go
 package ui
 
 import (
     "fmt"
+    "fyne.io/fyne/v2/layout"
+    "strings"
+
     "fyne.io/fyne/v2"
     "fyne.io/fyne/v2/container"
+    "fyne.io/fyne/v2/theme"
     "fyne.io/fyne/v2/widget"
-    "strings"
 )
 
-// buildIPListView construit la page affichant la liste des contrôleurs.
-func buildIPListView(state *UIState, controller *UIController) fyne.CanvasObject {
-    list := widget.NewList(
-        func() int { return len(state.controllerIPs) },
-        func() fyne.CanvasObject { return widget.NewLabel("") },
-        func(i widget.ListItemID, o fyne.CanvasObject) {
-            o.(*widget.Label).SetText(state.controllerIPs[i])
-        },
-    )
-
-    // On connecte l'action de sélection au contrôleur.
-    list.OnSelected = func(id widget.ListItemID) {
-        controller.SelectIPAndShowDetails(state.controllerIPs[id])
-    }
-
-    return container.NewScroll(list)
+type SizedEntry struct {
+    widget.Entry
+    DesiredWidth float32
 }
 
-func buildDetailView(state *UIState, controller *UIController) fyne.CanvasObject {
-    backButton := widget.NewButton("Retour à la liste", func() {
-        controller.GoBackToIPList()
-    })
+// NewSizedEntry est le constructeur pour notre widget.
+func NewSizedEntry(width float32) *SizedEntry {
+    entry := &SizedEntry{DesiredWidth: width}
+    // C'est une étape essentielle pour lier notre logique custom au widget de base.
+    entry.ExtendBaseWidget(entry)
+    return entry
+}
 
-    title := widget.NewLabel(fmt.Sprintf("Détails pour le contrôleur : %s", state.selectedIP))
+// MinSize est la méthode que Fyne appelle pour connaître la taille minimale.
+// C'est ici que nous imposons notre largeur.
+func (e *SizedEntry) MinSize() fyne.Size {
+    // On récupère la taille minimale d'origine pour connaître la hauteur idéale.
+    originalMin := e.Entry.MinSize()
+    // On retourne une nouvelle taille avec NOTRE largeur et la hauteur d'origine.
+    return fyne.NewSize(e.DesiredWidth, originalMin.Height)
+}
+
+// *** NOUVELLE FONCTION (RÉINTRODUITE ET CORRECTE) ***
+// buildHeader construit la barre de navigation en haut de la fenêtre.
+func buildHeader(state *UIState, controller *UIController) fyne.CanvasObject {
+    title := widget.NewLabel("Inspecteur Art'Hetic")
     title.TextStyle.Bold = true
 
-    // --- NOUVEAUX WIDGETS ---
-    // 1. Le champ de saisie (input).
-    // On le pré-remplit avec l'IP actuelle.
-    ipInput := widget.NewEntry()
-    ipInput.SetText(state.selectedIP)
+    var headerContent fyne.CanvasObject
+    if state.CurrentView == DetailView {
+        // On affiche un bouton "Retour" uniquement sur la page de détail.
+        backButton := widget.NewButtonWithIcon("Retour", theme.NavigateBackIcon(), func() {
+            controller.GoBackToIPList()
+        })
+        // On place le bouton à gauche et on laisse le titre prendre le reste de la place.
+        headerContent = container.NewBorder(nil, nil, backButton, nil, title)
+    } else {
+        // Sur la page d'accueil, on affiche juste le titre.
+        headerContent = title
+    }
 
-    // 2. Le bouton de validation.
-    validateButton := widget.NewButton("Valider le changement", func() {
-        // Au clic, on lit la valeur ACTUELLE de l'input...
-        currentInputValue := ipInput.Text
-        // ...et on la passe au contrôleur pour qu'il la traite.
-        controller.ValidateNewIP(currentInputValue)
-    })
-    // --- FIN DES NOUVEAUX WIDGETS ---
+    // On ajoute un padding et un séparateur pour un meilleur look.
+    return container.NewVBox(container.NewPadded(headerContent), widget.NewSeparator())
+}
 
-    // On crée un petit formulaire pour l'édition.
-    editForm := container.NewVBox(
-        widget.NewLabel("Modifier l'adresse IP :"),
-        ipInput,
-        validateButton,
-    )
-
-    table := widget.NewTable(
-        func() (int, int) { return len(state.selectedDetails), 2 },
-        func() fyne.CanvasObject { return widget.NewLabel("") },
-        func(ci widget.TableCellID, o fyne.CanvasObject) {
-            l := o.(*widget.Label)
-            if ci.Col == 0 {
-                l.SetText(fmt.Sprintf("Univers %d", state.selectedDetails[ci.Row].Universe))
-            } else {
-                parts := make([]string, len(state.selectedDetails[ci.Row].Ranges))
-                for i, rg := range state.selectedDetails[ci.Row].Ranges {
-                    parts[i] = fmt.Sprintf("%d–%d", rg[0], rg[1])
-                }
-                l.SetText(strings.Join(parts, ", "))
-            }
+// *** VUE DE LA LISTE, VERSION 4.0 (ÉPURÉE) ***
+func buildIPListView(state *UIState, controller *UIController) fyne.CanvasObject {
+    list := widget.NewList(
+        func() int {
+            return len(state.controllerIPs)
+        },
+        // Le template pour chaque item : simple, propre.
+        func() fyne.CanvasObject {
+            // Un HBox pour le texte et une icône "flèche" pour indiquer l'action.
+            return container.NewBorder(
+                nil, nil, nil, widget.NewIcon(theme.NavigateNextIcon()),
+                widget.NewLabel("Template IP"),
+            )
+        },
+        // Mise à jour de l'item.
+        func(i widget.ListItemID, o fyne.CanvasObject) {
+            ip := state.controllerIPs[i]
+            label := o.(*fyne.Container).Objects[0].(*widget.Label)
+            label.SetText(ip)
         },
     )
-    table.SetColumnWidth(0, 120)
 
-    // On assemble la page :
-    // - Le titre et le formulaire d'édition en haut.
-    // - La table des univers en dessous.
-    topContent := container.NewVBox(title, widget.NewSeparator(), editForm, widget.NewSeparator())
-    mainContent := container.NewBorder(topContent, nil, nil, nil, table)
+    list.OnSelected = func(id widget.ListItemID) {
+        controller.SelectIPAndShowDetails(state.controllerIPs[id])
+        list.UnselectAll()
+    }
 
-    // On retourne la vue complète avec le bouton "Retour" tout en haut.
-    return container.NewBorder(backButton, nil, nil, nil, mainContent)
+    // La liste elle-même gère son scroll, pas besoin d'en ajouter un autre.
+    return list
+}
+
+// *** VUE DE DÉTAIL, VERSION 4.0 (CORRIGÉE SELON VOS DEMANDES) ***
+func buildDetailView(state *UIState, controller *UIController) fyne.CanvasObject {
+
+    // --- SECTION ÉDITION : avec notre input à taille contrôlée ---
+
+    // On utilise notre nouveau widget au lieu de widget.NewEntry().
+    // 200.0 est une bonne largeur de départ pour une IP, facilement ajustable ici.
+    ipInput := NewSizedEntry(200.0)
+    ipInput.SetText(state.selectedIP)
+
+    validateButton := widget.NewButtonWithIcon("Sauvegarder", theme.ConfirmIcon(), func() {
+        controller.ValidateNewIP(ipInput.Text)
+    })
+    validateButton.Importance = widget.HighImportance
+
+    // On garde le layout HBox + Spacer, qui est correct.
+    // Maintenant que ipInput a une MinSize correcte, le layout fonctionnera comme prévu.
+    editLine := container.NewHBox(
+        widget.NewLabel("Nouvelle IP :"),
+        ipInput, // Notre widget personnalisé
+        validateButton,
+        layout.NewSpacer(), // Le spacer prendra toujours l'espace restant
+    )
+
+    // --- SECTION DONNÉES : On utilise la technique de boucle 'for' qui fonctionne ---
+    universeItems := []fyne.CanvasObject{
+        widget.NewLabelWithStyle("Univers & Plages d'Entités", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+    }
+
+    for _, detail := range state.selectedDetails {
+        labelUnivers := widget.NewLabel(fmt.Sprintf("Univers ArtNet %d", detail.Universe))
+
+        parts := make([]string, len(detail.Ranges))
+        for i, rg := range detail.Ranges {
+            parts[i] = fmt.Sprintf("%d à %d", rg[0], rg[1])
+        }
+        labelRanges := widget.NewLabel(strings.Join(parts, ", "))
+
+        row := container.NewBorder(nil, nil, labelUnivers, nil, labelRanges)
+        universeItems = append(universeItems, row)
+    }
+
+    universeList := container.NewVBox(universeItems...)
+
+    // --- ASSEMBLAGE FINAL DE LA VUE ---
+    return container.NewScroll(
+        container.NewVBox(
+            container.NewPadded(editLine),
+            widget.NewSeparator(),
+            container.NewPadded(universeList),
+        ),
+    )
 }
