@@ -40,9 +40,12 @@ func (s *Service) Start() {
 			
 			switch msg := parsedMessage.(type) {
 			case *ehub.EHubConfigMsg:
+				// Logs supprimés pour interface propre
 				s.configOut <- msg
 				
 			case *ehub.EHubUpdateMsg:
+				// Logs supprimés pour interface propre
+				
    				s.updateOut <- msg
 			default:
 				log.Printf("eHub Service: Type de message inconnu reçu du parser.")
