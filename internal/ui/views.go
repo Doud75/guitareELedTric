@@ -28,18 +28,36 @@ func buildIPListView(state *UIState, controller *UIController) fyne.CanvasObject
     return container.NewScroll(list)
 }
 
-// buildDetailView construit la page affichant les détails d'un contrôleur.
 func buildDetailView(state *UIState, controller *UIController) fyne.CanvasObject {
-    // Bouton pour revenir en arrière.
     backButton := widget.NewButton("Retour à la liste", func() {
         controller.GoBackToIPList()
     })
 
-    // Titre indiquant quelle IP on visualise.
     title := widget.NewLabel(fmt.Sprintf("Détails pour le contrôleur : %s", state.selectedIP))
     title.TextStyle.Bold = true
 
-    // La table des univers (similaire à l'ancien code).
+    // --- NOUVEAUX WIDGETS ---
+    // 1. Le champ de saisie (input).
+    // On le pré-remplit avec l'IP actuelle.
+    ipInput := widget.NewEntry()
+    ipInput.SetText(state.selectedIP)
+
+    // 2. Le bouton de validation.
+    validateButton := widget.NewButton("Valider le changement", func() {
+        // Au clic, on lit la valeur ACTUELLE de l'input...
+        currentInputValue := ipInput.Text
+        // ...et on la passe au contrôleur pour qu'il la traite.
+        controller.ValidateNewIP(currentInputValue)
+    })
+    // --- FIN DES NOUVEAUX WIDGETS ---
+
+    // On crée un petit formulaire pour l'édition.
+    editForm := container.NewVBox(
+        widget.NewLabel("Modifier l'adresse IP :"),
+        ipInput,
+        validateButton,
+    )
+
     table := widget.NewTable(
         func() (int, int) { return len(state.selectedDetails), 2 },
         func() fyne.CanvasObject { return widget.NewLabel("") },
@@ -56,11 +74,14 @@ func buildDetailView(state *UIState, controller *UIController) fyne.CanvasObject
             }
         },
     )
-    table.SetColumnWidth(0, 120) // Ajuster la largeur de la colonne univers
+    table.SetColumnWidth(0, 120)
 
-    // On assemble la page : titre en haut, puis la table. Le bouton est dans la barre du haut.
-    content := container.NewBorder(container.NewVBox(title, widget.NewSeparator()), nil, nil, nil, table)
+    // On assemble la page :
+    // - Le titre et le formulaire d'édition en haut.
+    // - La table des univers en dessous.
+    topContent := container.NewVBox(title, widget.NewSeparator(), editForm, widget.NewSeparator())
+    mainContent := container.NewBorder(topContent, nil, nil, nil, table)
 
-    // On retourne la vue complète avec le bouton "Retour" en haut.
-    return container.NewBorder(backButton, nil, nil, nil, content)
+    // On retourne la vue complète avec le bouton "Retour" tout en haut.
+    return container.NewBorder(backButton, nil, nil, nil, mainContent)
 }

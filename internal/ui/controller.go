@@ -1,20 +1,26 @@
 package ui
 
 import (
+    "guitarHetic/internal/config"
+    "log"
+    "net"
     "sort"
 )
 
 // UIController est le cerveau qui manipule l'état en réponse aux actions.
 type UIController struct {
-    state *UIState
-    // Ce callback sera appelé pour notifier à la vue principale de se redessiner.
-    onStateChange func()
+    state             *UIState
+    onStateChange     func()
+    currentConfig     *config.Config        // Garde une référence à la config actuelle pour la copier
+    physicalConfigOut chan<- *config.Config // Le canal pour envoyer la config mise à jour
 }
 
-func NewUIController(state *UIState) *UIController {
+func NewUIController(state *UIState, initialConfig *config.Config, cfgOut chan<- *config.Config) *UIController {
     return &UIController{
-        state:         state,
-        onStateChange: func() {}, // Initialisation avec un callback vide pour éviter les panics.
+        state:             state,
+        onStateChange:     func() {},
+        currentConfig:     initialConfig,
+        physicalConfigOut: cfgOut,
     }
 }
 
@@ -57,4 +63,69 @@ func (c *UIController) GoBackToIPList() {
 
     // 2. Notifier l'interface de se redessiner.
     c.onStateChange()
+}
+
+func deepCopyConfig(original *config.Config) *config.Config {
+    if original == nil {
+        return nil
+    }
+
+    // Copier la RoutingTable
+    newRoutingTable := make([]config.RoutingEntry, len(original.RoutingTable))
+    copy(newRoutingTable, original.RoutingTable)
+
+    // Copier la map UniverseIP
+    newUniverseIP := make(map[int]string)
+    for k, v := range original.UniverseIP {
+        newUniverseIP[k] = v
+    }
+
+    return &config.Config{
+        RoutingTable: newRoutingTable,
+        UniverseIP:   newUniverseIP,
+    }
+}
+
+func (c *UIController) ValidateNewIP(newIP string) {
+    // 1. Valider l'entrée
+    if net.ParseIP(newIP) == nil {
+        log.Printf("UI ERROR: L'adresse IP '%s' est invalide. Abandon.", newIP)
+        // Ici, on pourrait mettre à jour l'état pour afficher une erreur à l'utilisateur.
+        return
+    }
+
+    oldIP := c.state.selectedIP
+    log.Printf("UI ACTION: Validation de la nouvelle IP '%s' pour l'ancienne '%s'", newIP, oldIP)
+
+    // 2. Créer une copie profonde de la configuration actuelle
+    newConfig := deepCopyConfig(c.currentConfig)
+
+    // 3. Modifier la copie
+    for i, entry := range newConfig.RoutingTable {
+        if entry.IP == oldIP {
+            newConfig.RoutingTable[i].IP = newIP
+        }
+    }
+    // On reconstruit la map UniverseIP pour être certain de sa cohérence
+    for i, ip := range newConfig.UniverseIP {
+        if ip == oldIP {
+            newConfig.UniverseIP[i] = newIP
+        }
+    }
+
+    // 4. Envoyer la configuration mise à jour au processeur
+    log.Println("UI ACTION: Envoi de la configuration mise à jour au processeur...")
+    c.physicalConfigOut <- newConfig
+
+    // 5. Mettre à jour l'état interne de l'UI
+    // Le contrôleur considère maintenant la nouvelle config comme la version "actuelle".
+    c.currentConfig = newConfig
+    // On met à jour l'état qui pilote les vues.
+    newIPs, newCtrlMap := BuildModel(newConfig)
+    c.state.allControllers = newCtrlMap
+    c.state.controllerIPs = newIPs
+
+    log.Println("UI ACTION: Changement appliqué. Retour à la liste.")
+    // 6. Naviguer en arrière
+    c.GoBackToIPList() // Cette méthode déclenche déjà onStateChange, donc la vue sera rafraîchie.
 }

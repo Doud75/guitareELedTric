@@ -11,13 +11,13 @@ import (
 )
 
 // RunUI initialise et lance l'application graphique.
-func RunUI(ctx context.Context, cfg *config.Config) {
+func RunUI(ctx context.Context, cfg *config.Config, physicalConfigOut chan<- *config.Config) {
     a := app.New()
     w := a.NewWindow("Inspecteur de Contrôleurs ArtNet")
 
     // 1. Créer le modèle d'état et le contrôleur.
     state := NewUIState(cfg)
-    controller := NewUIController(state)
+    controller := NewUIController(state, cfg, physicalConfigOut)
 
     // 2. Définir la fonction de routage qui reconstruit l'interface.
     //    Cette fonction sera appelée à chaque changement d'état.

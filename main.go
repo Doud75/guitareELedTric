@@ -79,7 +79,7 @@ func main() {
     log.Println("Main: Envoi de la configuration initiale au Processor.")
     physicalConfigOut <- appConfig
 
-    ui.RunUI(ctx, appConfig)
+    ui.RunUI(ctx, appConfig, physicalConfigOut)
 
     // --- ÉTAPE 6 : ATTENTE AVEC INTERFACE FAKER ---
     log.Println("Système entièrement démarré.")
