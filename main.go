@@ -67,10 +67,7 @@ func main() {
     physicalConfigOut <- appConfig
     log.Println("Système backend démarré. Lancement de l'interface graphique...")
 
-    // On lance l'UI. C'est maintenant la boucle principale de l'application.
-    // Elle prendra fin lorsque la fenêtre sera fermée.
-    ui.RunUI(ctx, appConfig, physicalConfigOut, faker)
-
-    cancel()
+    ui.RunUI(appConfig, physicalConfigOut, faker)
+    
     log.Println("Arrêt complet de l'application.")
 }
