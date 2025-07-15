@@ -7,68 +7,95 @@ import (
 
     "fyne.io/fyne/v2"
     "fyne.io/fyne/v2/container"
+    "fyne.io/fyne/v2/theme" // Important pour les icônes !
     "fyne.io/fyne/v2/widget"
 )
 
-// buildIPListView construit la page affichant la liste des contrôleurs.
+// *** NOUVELLE FONCTION ***
+// buildHeader construit la barre de titre qui change en fonction du contexte.
+func buildHeader(state *UIState, controller *UIController) fyne.CanvasObject {
+    title := widget.NewLabel("Contrôleurs ArtNet")
+    title.TextStyle.Bold = true
+
+    // Si nous sommes dans la vue de détail, on ajoute un bouton "Retour".
+    if state.CurrentView == DetailView {
+        backButton := widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() {
+            controller.GoBackToIPList()
+        })
+
+        // On met le bouton à gauche et le titre à droite.
+        return container.NewBorder(nil, nil, backButton, nil, title)
+    }
+
+    // Sinon, on affiche juste le titre.
+    return container.NewPadded(title)
+}
+
+// *** VUE DE LA LISTE, VERSION 2.0 ***
 func buildIPListView(state *UIState, controller *UIController) fyne.CanvasObject {
+    // On utilise une List, mais chaque élément sera une carte interactive.
     list := widget.NewList(
-        func() int { return len(state.controllerIPs) },
-        func() fyne.CanvasObject { return widget.NewLabel("") },
+        func() int {
+            return len(state.controllerIPs)
+        },
+        // Le template pour chaque item : une carte avec une icône et un label.
+        func() fyne.CanvasObject {
+            return widget.NewCard("", "", container.NewHBox(
+                widget.NewIcon(theme.ComputerIcon()),
+                widget.NewLabel("template ip"),
+            ))
+        },
+        // La fonction qui met à jour un item avec les bonnes données.
         func(i widget.ListItemID, o fyne.CanvasObject) {
-            o.(*widget.Label).SetText(state.controllerIPs[i])
+            card := o.(*widget.Card)
+            card.SetTitle(state.controllerIPs[i])
+            card.SetSubTitle(fmt.Sprintf("%d univers configurés", len(state.allControllers[state.controllerIPs[i]])))
         },
     )
 
-    // On connecte l'action de sélection au contrôleur.
+    // Quand un item est sélectionné, on navigue vers les détails.
     list.OnSelected = func(id widget.ListItemID) {
         controller.SelectIPAndShowDetails(state.controllerIPs[id])
+        list.UnselectAll() // Pour un effet visuel plus propre
     }
 
-    return container.NewScroll(list)
+    return list
 }
 
+// *** VUE DE DÉTAIL, VERSION 2.0 ***
 func buildDetailView(state *UIState, controller *UIController) fyne.CanvasObject {
-    backButton := widget.NewButton("Retour à la liste", func() {
-        controller.GoBackToIPList()
-    })
-
-    title := widget.NewLabel(fmt.Sprintf("Détails pour le contrôleur : %s", state.selectedIP))
-    title.TextStyle.Bold = true
-
-    // --- NOUVEAUX WIDGETS ---
-    // 1. Le champ de saisie (input).
-    // On le pré-remplit avec l'IP actuelle.
+    // --- CARTE 1: Formulaire d'édition ---
     ipInput := widget.NewEntry()
     ipInput.SetText(state.selectedIP)
 
-    // 2. Le bouton de validation.
-    validateButton := widget.NewButton("Valider le changement", func() {
-        // Au clic, on lit la valeur ACTUELLE de l'input...
-        currentInputValue := ipInput.Text
-        // ...et on la passe au contrôleur pour qu'il la traite.
-        controller.ValidateNewIP(currentInputValue)
+    // On ajoute une icône au bouton "Valider"
+    validateButton := widget.NewButtonWithIcon("Sauvegarder", theme.ConfirmIcon(), func() {
+        controller.ValidateNewIP(ipInput.Text)
     })
-    // --- FIN DES NOUVEAUX WIDGETS ---
+    validateButton.Importance = widget.HighImportance // Le rend plus visible (souvent en couleur)
 
-    // On crée un petit formulaire pour l'édition.
     editForm := container.NewVBox(
-        widget.NewLabel("Modifier l'adresse IP :"),
+        widget.NewLabel("Modifier l'adresse IP du contrôleur :"),
         ipInput,
         validateButton,
     )
 
+    // On met le formulaire dans une carte pour le grouper visuellement.
+    editCard := widget.NewCard("Configuration", "", editForm)
+
+    // --- CARTE 2: Table des univers ---
     table := widget.NewTable(
         func() (int, int) { return len(state.selectedDetails), 2 },
         func() fyne.CanvasObject { return widget.NewLabel("") },
         func(ci widget.TableCellID, o fyne.CanvasObject) {
             l := o.(*widget.Label)
+            detail := state.selectedDetails[ci.Row]
             if ci.Col == 0 {
-                l.SetText(fmt.Sprintf("Univers %d", state.selectedDetails[ci.Row].Universe))
+                l.SetText(fmt.Sprintf("Univers %d", detail.Universe))
             } else {
-                parts := make([]string, len(state.selectedDetails[ci.Row].Ranges))
-                for i, rg := range state.selectedDetails[ci.Row].Ranges {
-                    parts[i] = fmt.Sprintf("%d–%d", rg[0], rg[1])
+                parts := make([]string, len(detail.Ranges))
+                for i, rg := range detail.Ranges {
+                    parts[i] = fmt.Sprintf("%d à %d", rg[0], rg[1])
                 }
                 l.SetText(strings.Join(parts, ", "))
             }
@@ -76,12 +103,11 @@ func buildDetailView(state *UIState, controller *UIController) fyne.CanvasObject
     )
     table.SetColumnWidth(0, 120)
 
-    // On assemble la page :
-    // - Le titre et le formulaire d'édition en haut.
-    // - La table des univers en dessous.
-    topContent := container.NewVBox(title, widget.NewSeparator(), editForm, widget.NewSeparator())
-    mainContent := container.NewBorder(topContent, nil, nil, nil, table)
+    // On met la table dans une carte pour la cohérence visuelle.
+    // On utilise un conteneur scrollable au cas où la table serait très grande.
+    tableCard := widget.NewCard("Univers & Plages d'Entités", "", container.NewScroll(table))
 
-    // On retourne la vue complète avec le bouton "Retour" tout en haut.
-    return container.NewBorder(backButton, nil, nil, nil, mainContent)
+    // On retourne une boîte verticale contenant nos deux cartes.
+    // Le container.Scroll englobe le tout pour s'adapter aux petites fenêtres.
+    return container.NewScroll(container.NewVBox(editCard, tableCard))
 }
