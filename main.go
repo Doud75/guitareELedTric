@@ -1,73 +1,90 @@
-// File: main.go
+// main.go
 package main
 
 import (
-    "context"
-    app_ehub "guitarHetic/internal/application/ehub"
-    app_processor "guitarHetic/internal/application/processor"
-    "guitarHetic/internal/config"
-    domain_artnet "guitarHetic/internal/domain/artnet"
-    "guitarHetic/internal/domain/ehub"
-    infra_artnet "guitarHetic/internal/infrastructure/artnet"
-    infra_ehub "guitarHetic/internal/infrastructure/ehub"
-    "guitarHetic/internal/simulator"
-    "guitarHetic/internal/ui"
-    "log"
+	"context"
+	"log"
+	
+	// Plus besoin de bufio, fmt, os, strings si on retire le contrôle par terminal
+	app_ehub "guitarHetic/internal/application/ehub"
+	app_processor "guitarHetic/internal/application/processor"
+	"guitarHetic/internal/config"
+	domain_artnet "guitarHetic/internal/domain/artnet"
+	"guitarHetic/internal/domain/ehub"
+	infra_artnet "guitarHetic/internal/infrastructure/artnet"
+	infra_ehub "guitarHetic/internal/infrastructure/ehub"
+	"guitarHetic/internal/simulator"
+	"guitarHetic/internal/ui"
 )
 
 func main() {
-    log.Println("Démarrage du système de routage eHuB -> ArtNet...")
+	log.Println("Démarrage du système de routage eHuB -> ArtNet...")
 
-    // --- CHARGEMENT DE LA CONFIGURATION ---
-    appConfig, err := config.Load("internal/config/routing.xlsx")
-    if err != nil {
-        log.Fatalf("Erreur fatale: Impossible de charger la configuration: %v", err)
-    }
+	// --- 1. CONFIGURATION ---
+	appConfig, err := config.Load("internal/config/routing.xlsx")
+	if err != nil {
+		log.Fatalf("Erreur fatale: Impossible de charger la configuration: %v", err)
+	}
 
-    // --- CRÉATION DES CANAUX ET CONTEXTE ---
-    rawPacketChannel := make(chan ehub.RawPacket, 1000)
-    configChannel := make(chan *ehub.EHubConfigMsg, 50)
-    updateChannel := make(chan *ehub.EHubUpdateMsg, 1000)
-    artnetQueue := make(chan domain_artnet.LEDMessage, 10000)
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
+	// --- 2. CANAUX ET CONTEXTE ---
+	rawPacketChannel := make(chan ehub.RawPacket, 1000)
+	configChannel := make(chan *ehub.EHubConfigMsg, 50)
+	finalUpdateChannel := make(chan *ehub.EHubUpdateMsg, 1000)
+	artnetQueue := make(chan domain_artnet.LEDMessage, 10000)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-    // --- ÉTAPE 3 : CONSTRUCTION DES COMPOSANTS ---
+	// Canaux pour l'aiguilleur
+	eHubUpdateChannel := make(chan *ehub.EHubUpdateMsg, 1000)
+	fakerUpdateChannel := make(chan *ehub.EHubUpdateMsg, 1000)
+	fakerModeSwitch := make(chan bool)
 
-    // a) Infrastructure (couche externe)
-    const eHubPort = 8765
-    listener, err := infra_ehub.NewListener(eHubPort, rawPacketChannel)
-    if err != nil {
-        log.Fatalf("Erreur Listener: %v", err)
-    }
+	// --- 3. CONSTRUCTION DES COMPOSANTS ---
+	listener, _ := infra_ehub.NewListener(8765, rawPacketChannel)
+	sender, _ := infra_artnet.NewSender()
+	parser := app_ehub.NewParser()
+	eHubService := app_ehub.NewService(rawPacketChannel, parser, configChannel, eHubUpdateChannel)
+	processorService, physicalConfigOut := app_processor.NewService(configChannel, finalUpdateChannel, artnetQueue)
+	faker := simulator.NewFaker(fakerUpdateChannel, configChannel, fakerModeSwitch, appConfig)
 
-    // Le Sender a besoin de la map des IPs des univers.
-    sender, err := infra_artnet.NewSender()
-    if err != nil {
-        log.Fatalf("Erreur Sender: %v", err)
-    }
+	// --- 4. DÉMARRAGE DES SERVICES BACKEND DANS DES GOROUTINES ---
+	log.Println("Démarrage des services backend en arrière-plan...")
 
-    // b) Application (logique métier)
-    parser := app_ehub.NewParser()
-    eHubService := app_ehub.NewService(rawPacketChannel, parser, configChannel, updateChannel)
+	// Lancement de l'aiguilleur
+	go func() {
+		isFakerActive := false
+		log.Println("Aiguilleur: Démarré en mode LIVE (écoute eHub).")
+		for {
+			select {
+			case <-ctx.Done(): return // Permet d'arrêter proprement la goroutine
+			case mode := <-fakerModeSwitch:
+				if mode != isFakerActive {
+					isFakerActive = mode
+					if isFakerActive { log.Println("Aiguilleur: Passage en mode FAKER.")
+					} else { log.Println("Aiguilleur: Retour au mode LIVE.") }
+				}
+			case msg := <-fakerUpdateChannel:
+				if isFakerActive { finalUpdateChannel <- msg }
+			case msg := <-eHubUpdateChannel:
+				if !isFakerActive { finalUpdateChannel <- msg }
+			}
+		}
+	}()
 
-    // Le Processor nous donne un canal pour lui envoyer des configs plus tard.
-    processorService, physicalConfigOut := app_processor.NewService(configChannel, updateChannel, artnetQueue)
+	listener.Start()
+	eHubService.Start()
+	processorService.Start()
+	go sender.Run(ctx, artnetQueue)
 
-    // c) Faker pour tests (E10)
-    faker := simulator.NewFaker(updateChannel, configChannel, appConfig)
+	// --- 5. INJECTION DE LA CONFIG & DÉMARRAGE DE L'UI SUR LE THREAD PRINCIPAL ---
+	physicalConfigOut <- appConfig
+	log.Println("Système backend démarré. Lancement de l'interface graphique...")
 
-    // --- DÉMARRAGE DES SERVICES BACKEND ---
-    listener.Start()
-    eHubService.Start()
-    processorService.Start()
-    go sender.Run(ctx, artnetQueue)
+	// L'appel à RunUI est maintenant la dernière action de la fonction main.
+	// Il va bloquer l'exécution jusqu'à ce que la fenêtre soit fermée.
+	// C'est la manière correcte de lancer une application Fyne.
+	ui.RunUI(appConfig, physicalConfigOut, faker)
 
-    // --- INJECTION DE LA CONFIG & DÉMARRAGE DE L'UI ---
-    physicalConfigOut <- appConfig
-    log.Println("Système backend démarré. Lancement de l'interface graphique...")
-
-    ui.RunUI(appConfig, physicalConfigOut, faker)
-    
-    log.Println("Arrêt complet de l'application.")
+	// Ce log ne s'affichera que lorsque la fenêtre UI aura été fermée.
+	log.Println("Arrêt complet de l'application.")
 }

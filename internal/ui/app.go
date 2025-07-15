@@ -56,37 +56,42 @@ func RunUI(cfg *config.Config, physicalConfigOut chan<- *config.Config, faker *s
     w.ShowAndRun()
 }
 
-// buildMainMenu est une fonction d'aide pour garder RunUI propre.
 func buildMainMenu(controller *UIController) *fyne.MainMenu {
-    // Menu "Fichier"
-    fileMenu := fyne.NewMenu("Art'hetic",
-        fyne.NewMenuItem("Quitter", func() {
-            controller.QuitApp()
-        }),
-    )
+	// Menu "Fichier" (inchangé)
+	fileMenu := fyne.NewMenu("Art'hetic",
+		fyne.NewMenuItem("Quitter", func() {
+			controller.QuitApp()
+		}),
+	)
 
-    // --- Menu "Faker" avec sous-menus ---
+	// --- Menu "Faker" avec la nouvelle option ---
 
-    // On crée l'élément de menu parent. Son action est `nil`.
-    solidColorItem := fyne.NewMenuItem("Couleur Unie", nil)
-    // On attache le sous-menu à sa propriété .ChildMenu.
-    solidColorItem.ChildMenu = fyne.NewMenu("",
-        fyne.NewMenuItem("Blanc", func() { controller.RunFakerCommand("white") }),
-        fyne.NewMenuItem("Rouge", func() { controller.RunFakerCommand("red") }),
-        fyne.NewMenuItem("Vert", func() { controller.RunFakerCommand("green") }),
-        fyne.NewMenuItem("Bleu", func() { controller.RunFakerCommand("blue") }),
-        fyne.NewMenuItemSeparator(),
-        fyne.NewMenuItem("Noir (Éteindre)", func() { controller.RunFakerCommand("black") }),
-    )
+	solidColorItem := fyne.NewMenuItem("Couleur Unie", nil)
+	solidColorItem.ChildMenu = fyne.NewMenu("",
+		fyne.NewMenuItem("Blanc", func() { controller.RunFakerCommand("white") }),
+		fyne.NewMenuItem("Rouge", func() { controller.RunFakerCommand("red") }),
+		fyne.NewMenuItem("Vert", func() { controller.RunFakerCommand("green") }),
+		fyne.NewMenuItem("Bleu", func() { controller.RunFakerCommand("blue") }),
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Noir (Éteindre)", func() { controller.RunFakerCommand("black") }),
+	)
 
-    animationsItem := fyne.NewMenuItem("Animations", nil)
-    animationsItem.ChildMenu = fyne.NewMenu("",
-        fyne.NewMenuItem("Vague Animée", func() { controller.RunFakerCommand("animation") }),
-        fyne.NewMenuItem("Arrêter l'animation", func() { controller.RunFakerCommand("stop") }),
-    )
+	animationsItem := fyne.NewMenuItem("Animations", nil)
+	animationsItem.ChildMenu = fyne.NewMenu("",
+		fyne.NewMenuItem("Vague Animée", func() { controller.RunFakerCommand("animation") }),
+		fyne.NewMenuItem("Arrêter l'animation", func() { controller.RunFakerCommand("stop") }),
+	)
 
-    // On assemble le menu "Faker" avec les éléments contenant les sous-menus.
-    fakerMenu := fyne.NewMenu("Faker", solidColorItem, animationsItem)
+	// On assemble le menu "Faker".
+	fakerMenu := fyne.NewMenu("Faker",
+		solidColorItem,
+		animationsItem,
+		// --- AJOUT DE L'OPTION DE DÉSACTIVATION ---
+		fyne.NewMenuItemSeparator(), // Un séparateur pour la clarté visuelle
+		fyne.NewMenuItem("Retour au mode LIVE (eHub)", func() {
+			controller.SwitchToLiveMode()
+		}),
+	)
 
-    return fyne.NewMainMenu(fileMenu, fakerMenu)
+	return fyne.NewMainMenu(fileMenu, fakerMenu)
 }
