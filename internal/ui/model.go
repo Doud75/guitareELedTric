@@ -1,4 +1,3 @@
-// File: internal/ui/model.go
 package ui
 
 import (

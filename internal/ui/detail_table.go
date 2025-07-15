@@ -1,4 +1,3 @@
-// File: internal/ui/detail_table.go
 package ui
 
 import (

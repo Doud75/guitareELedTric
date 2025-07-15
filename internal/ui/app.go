@@ -1,10 +1,8 @@
-// File: internal/ui/app.go
 package ui
 
 import (
     "context"
     "fyne.io/fyne/v2"
-    "log"
     "sort"
 
     "fyne.io/fyne/v2/app"
@@ -33,12 +31,6 @@ func RunUI(ctx context.Context, cfg *config.Config) {
     })
 
     reloadBtn := widget.NewButton("Recharger", func() {
-        newCfg, err := config.Load("internal/config/routing.csv")
-        if err != nil {
-            log.Printf("%v", err)
-            return
-        }
-        cfg = newCfg
         ips, ctrlMap = BuildModel(cfg)
         list.Refresh()
         *detailData = (*detailData)[:0]

@@ -1,4 +1,3 @@
-// File: internal/ui/controller_list.go
 package ui
 
 import (
