@@ -1,6 +1,7 @@
 package artnet
 
 type LEDMessage struct {
-    Universe int
-    Data     [512]byte
+    DestinationIP string
+    Universe      int
+    Data          [512]byte
 }

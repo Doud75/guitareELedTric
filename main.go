@@ -52,7 +52,7 @@ func main() {
     }
 
     // Le Sender a besoin de la map des IPs des univers.
-    sender, err := infra_artnet.NewSender(appConfig.UniverseIP)
+    sender, err := infra_artnet.NewSender()
     if err != nil {
         log.Fatalf("Erreur Sender: %v", err)
     }
