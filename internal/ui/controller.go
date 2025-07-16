@@ -191,6 +191,15 @@ func (c *UIController) RunFakerCommand(command string) {
     }
 }
 
+func (c *UIController) RunFakerCustomRGBW(r, g, b, w byte) {
+    if c.faker != nil {
+        log.Printf("[UI-CONTROLLER] Envoi de la commande Custom RGBW au Faker: R=%d, G=%d, B=%d, W=%d", r, g, b, w)
+        go c.faker.SendCustomColor(r, g, b, w)
+    }
+}
+
+
+
 func (c *UIController) ValidateNewIP(newIP string) {
     if net.ParseIP(newIP) == nil {
         log.Printf("UI ERROR: L'adresse IP '%s' est invalide. Abandon.", newIP)
