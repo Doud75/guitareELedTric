@@ -177,26 +177,65 @@ func (f *Faker) StartWaveAnimation() {
 		return
 	}
 	f.active = true
-	f.modeSwitch <- true // On passe en mode Faker au début de l'animation.
-
+	f.modeSwitch <- true 
 	go func() {
 		f.sendInitialConfig()
-		ticker := time.NewTicker(50 * time.Millisecond)
+		
+		ticker := time.NewTicker(50 * time.Millisecond) // ~20 FPS
 		defer ticker.Stop()
-	
+		
+		position := 0.0
+		direction := 0.02 // Vitesse de déplacement de la vague
 
+		// La boucle principale de l'animation.
+		// Elle s'arrêtera quand f.active deviendra false (via la commande "stop").
 		for f.active {
 			select {
 			case <-ticker.C:
+				
+				position += direction
+				if position > 1.0 {
+					position = 0.0 // On repart du début.
+				}
+
 				var entities []ehub.EHubEntityState
-				// ... (logique de la vague animée, identique à avant)
+				totalEntities := len(f.allEntityIDs)
+				waveWidth := 0.3 // Largeur de la vague en pourcentage de l'écran.
+				
+				// Couleur de la vague (orange).
+				r, g, b := byte(255), byte(100), byte(0) 
+
+				// On calcule la couleur pour chaque LED.
+				for i, entityID := range f.allEntityIDs {
+					entityPos := float64(i) / float64(totalEntities-1)
+					distance := math.Abs(entityPos - position)
+					
+					var intensity float64
+					if distance <= waveWidth/2 {
+						// Formule pour un effet de "dégradé" sur les bords de la vague.
+						intensity = 1.0 - (distance / (waveWidth / 2))
+					}
+					
+					entities = append(entities, ehub.EHubEntityState{
+						ID:    entityID,
+						Red:   byte(float64(r) * intensity),
+						Green: byte(float64(g) * intensity),
+						Blue:  byte(float64(b) * intensity),
+					})
+				}
+				
+				// On envoie le message update avec la liste d'entités qui vient d'être calculée.
 				f.updateOut <- &ehub.EHubUpdateMsg{Universe: 0, Entities: entities}
+
+				// --- FIN DE LA LOGIQUE DE CALCUL ---
+
 			default:
-				time.Sleep(10 * time.Millisecond)
+				time.Sleep(5 * time.Millisecond)
 			}
 		}
 	}()
-	fmt.Println("Wave animation started. Type 'stop' to end.")
+
+	fmt.Println("Wave animation started. Type 'stop' or use the UI menu to end.")
 }
 
 func (f *Faker) Stop() {
