@@ -153,3 +153,13 @@ func (c *UIController) ValidateNewIP(newIP string) {
     // 6. Naviguer en arrière
     c.GoBackToIPList() // Cette méthode déclenche déjà onStateChange, donc la vue sera rafraîchie.
 }
+
+// SwitchToLiveMode demande au faker de se désactiver et de repasser l'aiguilleur
+// en mode eHub.
+func (c *UIController) SwitchToLiveMode() {
+    if c.faker != nil {
+        // La logique est déjà dans le Faker, on n'a qu'à l'appeler.
+        // On le fait dans une goroutine pour ne jamais bloquer l'UI, par principe.
+        go c.faker.SwitchToLiveMode()
+    }
+}
