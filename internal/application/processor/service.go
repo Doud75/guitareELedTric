@@ -1,171 +1,147 @@
-// internal/application/processor/service.go
 package processor
 
 import (
-    "log"
-    "reflect"
-    "sync" // Importé pour sync.Pool
-
-    "guitarHetic/internal/config"
-    "guitarHetic/internal/domain/artnet"
-    "guitarHetic/internal/domain/ehub"
+	"log"
+	"reflect"
+	"sync"
+	"guitarHetic/internal/config"
+	"guitarHetic/internal/domain/artnet"
+	"guitarHetic/internal/domain/ehub"
 )
 
-// Déclaration du pool au niveau du package.
-// Il va stocker et réutiliser les maps de frames pour éviter des allocations constantes.
-var frameMapPool = sync.Pool{
-    New: func() interface{} {
-        m := make(map[int]*[512]byte)
-        return &m
-    },
-}
-
-// DestinationChannel est un alias pour le canal de sortie vers le sender.
-// Il transporte maintenant le message enrichi.
 type DestinationChannel chan<- artnet.LEDMessage
 
-// FinalRouteInfo contient les informations pré-calculées pour un routage ultra-rapide.
-// Elle inclut maintenant l'adresse IP de destination.
 type FinalRouteInfo struct {
-    IsEnabled       bool
-    TargetIP        string // L'adresse IP de destination pour cette entité.
-    TargetUniverse  int
-    DMXBufferOffset int
+	IsEnabled       bool
+	TargetIP        string
+	TargetUniverse  int
+	DMXBufferOffset int
 }
 
-// Service est le cœur du traitement logique. Il ne gère plus le cycle de vie du sender.
 type Service struct {
-    configMsgIn        <-chan *ehub.EHubConfigMsg
-    updateMsgIn        <-chan *ehub.EHubUpdateMsg
-    PhysicalConfigIn   chan *config.Config
-    dest               DestinationChannel
-    routingTable       []FinalRouteInfo
-    lastUsedConfigMsg  *ehub.EHubConfigMsg
-    lastPhysicalConfig *config.Config
-    persistentFrames   map[int]*[512]byte
-    framesMutex        sync.RWMutex
+	configMsgIn        <-chan *ehub.EHubConfigMsg
+	updateMsgIn        <-chan *ehub.EHubUpdateMsg
+	PhysicalConfigIn   chan *config.Config
+	dest               DestinationChannel
+	routingTable       []FinalRouteInfo
+	lastUsedConfigMsg  *ehub.EHubConfigMsg
+	lastPhysicalConfig *config.Config
+	persistentStates   map[int]*[512]byte
+	stateMutex         sync.Mutex // Un Mutex simple est suffisant ici
 }
 
-// NewService construit une nouvelle instance du service de processeur.
 func NewService(
-    configMsgIn <-chan *ehub.EHubConfigMsg,
-    updateMsgIn <-chan *ehub.EHubUpdateMsg,
-    dest DestinationChannel,
+	configMsgIn <-chan *ehub.EHubConfigMsg,
+	updateMsgIn <-chan *ehub.EHubUpdateMsg,
+	dest DestinationChannel,
 ) (*Service, chan *config.Config) {
-
-    physicalConfigChan := make(chan *config.Config)
-
-    return &Service{
-        configMsgIn:      configMsgIn,
-        updateMsgIn:      updateMsgIn,
-        PhysicalConfigIn: physicalConfigChan,
-        dest:             dest,
-        persistentFrames: make(map[int]*[512]byte),
-    }, physicalConfigChan
+	physicalConfigChan := make(chan *config.Config)
+	return &Service{
+		configMsgIn:      configMsgIn,
+		updateMsgIn:      updateMsgIn,
+		PhysicalConfigIn: physicalConfigChan,
+		dest:             dest,
+		persistentStates: make(map[int]*[512]byte),
+	}, physicalConfigChan
 }
 
-// Start lance la goroutine principale du service.
 func (s *Service) Start() {
-    go func() {
-        log.Println("Processor: Service démarré.")
+	go func() {
+		log.Println("Processor: Service démarré (mode stateful optimisé).")
+		for {
+			select {
+			case newPhysicalConfig := <-s.PhysicalConfigIn:
+				s.handleNewPhysicalConfig(newPhysicalConfig)
+			case newConfigMsg := <-s.configMsgIn:
+				s.handleNewEHubConfig(newConfigMsg)
+			case updateMsg := <-s.updateMsgIn:
+				s.processUpdate(updateMsg)
+			}
+		}
+	}()
+}
 
-        for {
-            select {
-            case newPhysicalConfig := <-s.PhysicalConfigIn:
-                log.Println("Processor: Nouvelle configuration physique reçue. Reconstruction de la table de routage...")
-                s.lastPhysicalConfig = newPhysicalConfig
-                if s.lastUsedConfigMsg != nil {
-                    s.buildRoutingTable(s.lastUsedConfigMsg, s.lastPhysicalConfig)
-                }
+// processUpdate met à jour l'état persistant et envoie UNIQUEMENT les univers modifiés.
+func (s *Service) processUpdate(updateMsg *ehub.EHubUpdateMsg) {
+	if s.routingTable == nil || s.lastPhysicalConfig == nil {
+		return
+	}
 
-            case newConfigMsg := <-s.configMsgIn:
-                if s.lastUsedConfigMsg != nil && reflect.DeepEqual(s.lastUsedConfigMsg, newConfigMsg) {
-                    continue
-                }
+	s.stateMutex.Lock()
+	defer s.stateMutex.Unlock()
 
-                log.Println("Processor: Nouvelle configuration eHuB détectée.")
-                s.lastUsedConfigMsg = newConfigMsg
-                if s.lastPhysicalConfig != nil {
-                    s.buildRoutingTable(s.lastUsedConfigMsg, s.lastPhysicalConfig)
-                }
+	modifiedUniverses := make(map[int]struct{})
 
-            case updateMsg := <-s.updateMsgIn:
-                if s.routingTable == nil || s.lastPhysicalConfig == nil {
-                    continue // On ne peut rien faire sans table de routage et config physique.
-                }
+	for _, entity := range updateMsg.Entities {
+		const noiseThreshold = 15
+		if entity.Red < noiseThreshold && entity.Green < noiseThreshold && entity.Blue < noiseThreshold {
+			entity.Red, entity.Green, entity.Blue = 0, 0, 0
+		}
 
-                framesPtr := frameMapPool.Get().(*map[int]*[512]byte)
-                frames := *framesPtr
-                for k := range frames {
-                    delete(frames, k)
-                }
+		entityIndex := int(entity.ID)
+		if entityIndex >= len(s.routingTable) {
+			continue
+		}
 
-                s.framesMutex.RLock()
-                for universe, persistentFrame := range s.persistentFrames {
-                    newFrame := new([512]byte)
-                    copy(newFrame[:], persistentFrame[:])
-                    frames[universe] = newFrame
-                }
-                s.framesMutex.RUnlock()
+		routeInfo := s.routingTable[entityIndex]
+		if !routeInfo.IsEnabled {
+			continue
+		}
 
-                for _, entity := range updateMsg.Entities {
-                    const noiseThreshold = 15
-                    if entity.Red < noiseThreshold && entity.Green < noiseThreshold && entity.Blue < noiseThreshold && entity.White < noiseThreshold {
-                        entity.Red, entity.Green, entity.Blue = 0, 0, 0
-                    }
+		universe := routeInfo.TargetUniverse
+		offset := routeInfo.DMXBufferOffset
 
-                    entityIndex := int(entity.ID)
-                    if entityIndex >= len(s.routingTable) {
-                        continue
-                    }
+		// S'assurer que le buffer pour cet univers existe dans notre état persistant.
+		if _, ok := s.persistentStates[universe]; !ok {
+			s.persistentStates[universe] = new([512]byte)
+		}
 
-                    routeInfo := s.routingTable[entityIndex]
+		// On met à jour directement l'état persistant. PAS de copie massive.
+		if offset+2 < 512 {
+			s.persistentStates[universe][offset+0] = entity.Red
+			s.persistentStates[universe][offset+1] = entity.Green
+			s.persistentStates[universe][offset+2] = entity.Blue
+			modifiedUniverses[universe] = struct{}{} // On note que cet univers a changé.
+		}
+	}
 
-                    if routeInfo.IsEnabled {
-                        targetFrame, ok := frames[routeInfo.TargetUniverse]
-                        if !ok {
-                            targetFrame = new([512]byte)
-                            frames[routeInfo.TargetUniverse] = targetFrame
-                        }
+	// On envoie une copie de l'état complet des SEULS univers qui ont été modifiés.
+	for universe := range modifiedUniverses {
+		ip, ok := s.lastPhysicalConfig.UniverseIP[universe]
+		if !ok {
+			continue
+		}
+		if frameData := s.persistentStates[universe]; frameData != nil {
+			// On envoie bien une copie pour que le Sender ne puisse pas modifier notre état.
+			dataToSend := *frameData 
+			s.dest <- artnet.LEDMessage{
+				DestinationIP: ip,
+				Universe:      universe,
+				Data:          dataToSend,
+			}
+		}
+	}
+}
 
-                        offset := routeInfo.DMXBufferOffset
-                        if offset+2 < 512 {
-                            targetFrame[offset+0] = entity.Red
-                            targetFrame[offset+1] = entity.Green
-                            targetFrame[offset+2] = entity.Blue
-                        }
-                    }
-                }
+// Les fonctions de gestion de config et de build de la table de routage
+// sont extraites pour plus de clarté.
+func (s *Service) handleNewPhysicalConfig(cfg *config.Config) {
+	log.Println("Processor: Nouvelle configuration physique reçue.")
+	s.lastPhysicalConfig = cfg
+	if s.lastUsedConfigMsg != nil {
+		s.buildRoutingTable(s.lastUsedConfigMsg, s.lastPhysicalConfig)
+	}
+}
 
-                s.framesMutex.Lock()
-                for universe, frameData := range frames {
-                    if s.persistentFrames[universe] == nil {
-                        s.persistentFrames[universe] = new([512]byte)
-                    }
-                    copy(s.persistentFrames[universe][:], frameData[:])
-                }
-                s.framesMutex.Unlock()
-
-                // On envoie tous les buffers DMX construits au Sender,
-                // en les enrichissant avec l'adresse IP de destination.
-                for u, data := range frames {
-                    ip, ok := s.lastPhysicalConfig.UniverseIP[u]
-                    if !ok {
-                        log.Printf("Processor: IP non trouvée pour l'univers %d dans la configuration, paquet ignoré.", u)
-                        continue
-                    }
-
-                    s.dest <- artnet.LEDMessage{
-                        DestinationIP: ip, // On ajoute l'IP de destination au message.
-                        Universe:      u,
-                        Data:          *data,
-                    }
-                }
-
-                frameMapPool.Put(framesPtr)
-            }
-        }
-    }()
+func (s *Service) handleNewEHubConfig(msg *ehub.EHubConfigMsg) {
+	if s.lastUsedConfigMsg != nil && reflect.DeepEqual(s.lastUsedConfigMsg, msg) {
+		return
+	}
+	log.Println("Processor: Nouvelle configuration eHuB détectée.")
+	s.lastUsedConfigMsg = msg
+	if s.lastPhysicalConfig != nil {
+		s.buildRoutingTable(s.lastUsedConfigMsg, s.lastPhysicalConfig)
+	}
 }
 
 // buildRoutingTable pré-calcule toutes les informations de routage, y compris l'IP de destination.
