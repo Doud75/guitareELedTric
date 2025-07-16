@@ -8,9 +8,9 @@ import (
 	"guitarHetic/internal/domain/ehub"
 	"log"
 	"math"
-	"sort"
 	"sync"
 	"time"
+	"slices"
 )
 
 
@@ -32,7 +32,7 @@ func NewFaker(updateOut chan<- *ehub.EHubUpdateMsg, configOut chan<- *ehub.EHubC
 	for _, entry := range cfg.RoutingTable {
 		entityIDs = append(entityIDs, uint16(entry.EntityID))
 	}
-	sort.Slice(entityIDs, func(i, j int) bool { return entityIDs[i] < entityIDs[j] })
+	slices.Sort(entityIDs)
 
 	log.Printf("Faker: Initialisé avec %d entités.", len(entityIDs))
 	return &Faker{
@@ -76,6 +76,14 @@ func (f *Faker) SwitchToLiveMode() {
 	log.Println("Faker: Retour au mode LIVE.")
 	f.modeSwitch <- false
 }
+func (f *Faker) SendCustomColor(r, g, b, w byte) {
+    // MODIFICATION DU LOG: Ajoutons un marqueur clair
+    log.Printf("[FAKER] Commande CustomColor reçue: R:%d G:%d B:%d W:%d", r, g, b, w)
+	f.stopCurrentOperation()
+	log.Println("[FAKER] Envoi du signal pour passer en mode FAKER (true) à l'aiguilleur...")
+	f.modeSwitch <- true
+	f.SendSolidColor(r, g, b, w)
+}
 
 // SendTestPattern est le point d'entrée pour les commandes de l'UI.
 func (f *Faker) SendTestPattern(command string) {
@@ -95,12 +103,6 @@ func (f *Faker) SendTestPattern(command string) {
 		f.SendSolidColor(0, 30, 0, 0)
 	case "blue":
 		f.SendSolidColor(0, 0, 30, 0)
-	case "yellow":
-		f.SendSolidColor(30, 30, 0, 0)
-	case "cyan":
-		f.SendSolidColor(0, 255, 255, 0)
-	case "magenta":
-		f.SendSolidColor(255, 0, 255, 0)
 	case "black", "off":
 		f.SendSolidColor(0, 0, 0, 0)
 	case "gradient":
@@ -108,13 +110,9 @@ func (f *Faker) SendTestPattern(command string) {
 	case "animation":
 		f.StartWaveAnimation()
 	case "stop":
-		// 'stop' arrête l'opération et revient au live.
 		f.SwitchToLiveMode()
-	case "help":
-		f.ShowHelp()
 	default:
 		fmt.Printf("Unknown pattern '%s'.\n", command)
-		// Si la commande est inconnue, on revient au mode live par sécurité.
 		f.SwitchToLiveMode()
 	}
 }
@@ -123,7 +121,6 @@ func (f *Faker) Stop() {
 	f.SwitchToLiveMode()
 }
 
-// --- Fonctions de génération de patterns ---
 
 // SendSolidColor lance une goroutine qui envoie la couleur en boucle jusqu'à ce qu'elle soit annulée.
 func (f *Faker) SendSolidColor(r, g, b, w byte) {
@@ -223,13 +220,6 @@ func (f *Faker) sendInitialConfig() {
 	f.configOut <- configMsg
 }
 
-func (f *Faker) ShowHelp() {
-	log.Println("---")
-	log.Println("=== Aide du Faker ===")
-	log.Println("Les commandes du Faker (via l'UI ou le terminal) arrêtent le flux eHub et prennent le contrôle.")
-	log.Println("Utilisez 'Retour au mode LIVE' ou la commande 'stop' pour revenir à l'écoute d'Unity.")
-	log.Println("---")
-}
 
 func (f *Faker) calculateWaveFrame(position, width float64, r, g, b byte) []ehub.EHubEntityState {
 	entities := make([]ehub.EHubEntityState, len(f.allEntityIDs))
