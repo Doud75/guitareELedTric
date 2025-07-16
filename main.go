@@ -29,7 +29,7 @@ func main() {
 	// --- 2. CANAUX ET CONTEXTE ---
 	rawPacketChannel := make(chan ehub.RawPacket, 1000)
 	configChannel := make(chan *ehub.EHubConfigMsg, 50)
-	finalUpdateChannel := make(chan *ehub.EHubUpdateMsg, 1000)
+	updateChannel := make(chan *ehub.EHubUpdateMsg, 1000)
 	artnetQueue := make(chan domain_artnet.LEDMessage, 10000)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -44,7 +44,7 @@ func main() {
 	sender, _ := infra_artnet.NewSender()
 	parser := app_ehub.NewParser()
 	eHubService := app_ehub.NewService(rawPacketChannel, parser, configChannel, eHubUpdateChannel)
-	processorService, physicalConfigOut := app_processor.NewService(configChannel, finalUpdateChannel, artnetQueue)
+	processorService, physicalConfigOut := app_processor.NewService(configChannel, updateChannel, artnetQueue)
 	faker := simulator.NewFaker(fakerUpdateChannel, configChannel, fakerModeSwitch, appConfig)
 
 	// --- 4. DÉMARRAGE DES SERVICES BACKEND DANS DES GOROUTINES ---
@@ -64,9 +64,9 @@ func main() {
 					} else { log.Println("Aiguilleur: Retour au mode LIVE.") }
 				}
 			case msg := <-fakerUpdateChannel:
-				if isFakerActive { finalUpdateChannel <- msg }
+				if isFakerActive { updateChannel <- msg }
 			case msg := <-eHubUpdateChannel:
-				if !isFakerActive { finalUpdateChannel <- msg }
+				if !isFakerActive { updateChannel <- msg }
 			}
 		}
 	}()
