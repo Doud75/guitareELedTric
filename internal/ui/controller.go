@@ -17,7 +17,7 @@ type UIController struct {
     onStateChange     func()
     currentConfig     *config.Config
     physicalConfigOut chan<- *config.Config
-    app               fyne.App // Conservé pour la fonction QuitApp
+    app               fyne.App
     faker             *simulator.Faker
     monitorIn         <-chan *UniverseMonitorData
 }
@@ -33,26 +33,39 @@ func NewUIController(state *UIState, initialConfig *config.Config, cfgOut chan<-
         faker:             faker,
         monitorIn:         monitorIn,
     }
-    // On lance l'écouteur en arrière-plan.
     go c.listenForMonitorUpdates()
     return c
 }
 
-// listenForMonitorUpdates est la goroutine qui met à jour les widgets et demande un rafraîchissement de l'UI.
-// CETTE FONCTION EST LA CLÉ DE LA CORRECTION.
+// amplifyColor est une petite fonction d'aide pour rendre les couleurs plus visibles.
+func amplifyColor(r, g, b byte) color.Color {
+    const minBrightness = 100
+    if r == 0 && g == 0 && b == 0 {
+        return color.Black
+    }
+    if r > 0 && r < minBrightness {
+        r = minBrightness
+    }
+    if g > 0 && g < minBrightness {
+        g = minBrightness
+    }
+    if b > 0 && b < minBrightness {
+        b = minBrightness
+    }
+    return color.NRGBA{R: r, G: g, B: b, A: 255}
+}
+
 func (c *UIController) listenForMonitorUpdates() {
     for data := range c.monitorIn {
-        // On s'assure que la vue est active et que les widgets ont bien été créés.
         if c.state.CurrentView != UniverseView || c.state.selectedUniverse != data.UniverseID || c.state.universeViewContent == nil {
             continue
         }
 
-        // Préparation des données (on peut le faire en dehors du fyne.Do)
         inputColors := make([]color.Color, len(c.state.ledInputWidgets))
         for i := range inputColors {
             if i < len(data.InputState) {
                 entity := data.InputState[i]
-                inputColors[i] = color.NRGBA{R: entity.Red, G: entity.Green, B: entity.Blue, A: 255}
+                inputColors[i] = amplifyColor(entity.Red, entity.Green, entity.Blue)
             } else {
                 inputColors[i] = color.Black
             }
@@ -63,30 +76,21 @@ func (c *UIController) listenForMonitorUpdates() {
             offset := i * 3
             if offset+2 < len(data.OutputDMX) {
                 r, g, b := data.OutputDMX[offset], data.OutputDMX[offset+1], data.OutputDMX[offset+2]
-                outputColors[i] = color.NRGBA{R: r, G: g, B: b, A: 255}
+                outputColors[i] = amplifyColor(r, g, b)
             } else {
                 outputColors[i] = color.Black
             }
         }
 
-        // CORRECTION: On exécute TOUTES les modifications de l'UI dans fyne.Do
         fyne.Do(func() {
             c.state.ledStateMutex.RLock()
             defer c.state.ledStateMutex.RUnlock()
-
-            // On vérifie que les widgets n'ont pas été détruits entre-temps
             if c.state.ledInputWidgets == nil || c.state.ledOutputWidgets == nil {
                 return
             }
-
-            log.Printf("UI FYNE.DO: Mise à jour des couleurs pour l'univers %d", data.UniverseID)
-
-            // Mise à jour des widgets d'entrée (eHub)
             for i, widget := range c.state.ledInputWidgets {
                 widget.SetColor(inputColors[i])
             }
-
-            // Mise à jour des widgets de sortie (Art-Net)
             for i, widget := range c.state.ledOutputWidgets {
                 widget.SetColor(outputColors[i])
             }
@@ -94,25 +98,71 @@ func (c *UIController) listenForMonitorUpdates() {
     }
 }
 
-// SetUpdateCallback permet à l'UI de s'enregistrer pour les changements de vue.
 func (c *UIController) SetUpdateCallback(callback func()) {
     c.onStateChange = callback
 }
 
-// SelectUniverseAndShowDetails prépare le changement vers la vue de monitoring.
-func (c *UIController) SelectUniverseAndShowDetails(universeID int) {
-    c.state.selectedUniverse = universeID
+// --- NOUVELLE LOGIQUE DE NAVIGATION ---
 
-    // CHANGEMENT: On construit la vue ici, UNE SEULE FOIS.
-    // La fonction buildUniverseView va peupler l'état avec les widgets créés.
-    c.state.universeViewContent = buildUniverseView(c.state)
-
-    c.state.CurrentView = UniverseView
-    // On déclenche le rafraîchissement global pour afficher la nouvelle vue.
+// navigateTo est la nouvelle fonction centralisée pour changer de vue.
+func (c *UIController) navigateTo(view ViewName) {
+    // On pousse la vue actuelle sur la pile d'historique.
+    c.state.viewStack = append(c.state.viewStack, c.state.CurrentView)
+    // On met à jour la vue actuelle.
+    c.state.CurrentView = view
+    // On rafraîchit l'interface.
     c.onStateChange()
 }
 
-// SelectIPAndShowDetails est appelée lorsqu'un utilisateur clique sur une IP.
+// GoBack est la nouvelle fonction "intelligente" pour le bouton retour.
+func (c *UIController) GoBack() {
+    stackLen := len(c.state.viewStack)
+    if stackLen == 0 {
+        return // Sécurité: ne rien faire si la pile est vide.
+    }
+
+    // 1. On récupère la vue précédente depuis la pile.
+    previousView := c.state.viewStack[stackLen-1]
+
+    // 2. On retire la vue de la pile (on la "pop").
+    c.state.viewStack = c.state.viewStack[:stackLen-1]
+
+    // 3. On nettoie l'état de la vue que l'on quitte, si nécessaire.
+    if c.state.CurrentView == UniverseView {
+        c.state.ledStateMutex.Lock()
+        c.state.universeViewContent = nil
+        c.state.ledInputWidgets = nil
+        c.state.ledOutputWidgets = nil
+        c.state.ledStateMutex.Unlock()
+    }
+
+    // 4. On définit la nouvelle vue actuelle.
+    c.state.CurrentView = previousView
+
+    // 5. On rafraîchit l'interface.
+    c.onStateChange()
+}
+
+// Les fonctions de navigation utilisent maintenant navigateTo.
+func (c *UIController) SelectUniverseAndShowDetails(universeID int) {
+    entityCount := 0
+    for _, route := range c.currentConfig.RoutingTable {
+        if route.Universe == universeID {
+            entityCount++
+        }
+    }
+    if entityCount == 0 {
+        log.Printf("UI CONTROLLER: Aucune entité trouvée pour l'univers %d. Affichage annulé.", universeID)
+        return
+    }
+
+    log.Printf("UI CONTROLLER: Construction de la vue pour l'univers %d avec %d entités.", universeID, entityCount)
+    c.state.selectedUniverse = universeID
+    c.state.universeViewContent = buildUniverseView(c.state, entityCount)
+
+    c.navigateTo(UniverseView) // Utilise la nouvelle fonction
+}
+
 func (c *UIController) SelectIPAndShowDetails(ip string) {
     c.state.selectedIP = ip
     entries := c.state.allControllers[ip]
@@ -122,26 +172,11 @@ func (c *UIController) SelectIPAndShowDetails(ip string) {
     }
     sort.Slice(details, func(i, j int) bool { return details[i].Universe < details[j].Universe })
     c.state.selectedDetails = details
-    c.state.CurrentView = DetailView
-    c.onStateChange()
+
+    c.navigateTo(DetailView) // Utilise la nouvelle fonction
 }
 
-// GoBackToIPList est appelée par le bouton "Retour".
-func (c *UIController) GoBackToIPList() {
-    // CHANGEMENT: On nettoie l'état pour libérer la mémoire des widgets.
-    c.state.ledStateMutex.Lock()
-    c.state.ledInputWidgets = nil
-    c.state.ledOutputWidgets = nil
-    c.state.universeViewContent = nil
-    c.state.ledStateMutex.Unlock()
-
-    c.state.CurrentView = IPListView
-    c.state.selectedIP = ""
-    c.state.selectedDetails = nil
-    c.onStateChange()
-}
-
-// --- AUTRES FONCTIONS DU CONTRÔLEUR (inchangées) ---
+// --- Fonctions restantes du contrôleur ---
 
 func (c *UIController) QuitApp() {
     if c.faker != nil {
@@ -178,7 +213,11 @@ func (c *UIController) ValidateNewIP(newIP string) {
     newIPs, newCtrlMap := BuildModel(newConfig)
     c.state.allControllers = newCtrlMap
     c.state.controllerIPs = newIPs
-    c.GoBackToIPList()
+
+    // Au lieu d'un retour direct, on vide la pile d'historique et on retourne à la liste
+    c.state.viewStack = make([]ViewName, 0)
+    c.state.CurrentView = IPListView
+    c.onStateChange()
 }
 
 func deepCopyConfig(original *config.Config) *config.Config {

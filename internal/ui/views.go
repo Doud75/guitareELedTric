@@ -13,51 +13,56 @@ import (
     "strings"
 )
 
-// --- VUE DE MONITORING (Nouvelle version) ---
-// Construit la vue UNE SEULE FOIS et peuple l'état avec les widgets créés.
-func buildUniverseView(state *UIState) fyne.CanvasObject {
-    // On prend un verrou en écriture car on va modifier les slices de widgets dans l'état.
+// --- VUE DE MONITORING (AVEC SÉPARATEUR FIXE ET ESPACEMENT) ---
+func buildUniverseView(state *UIState, ledCount int) fyne.CanvasObject {
     state.ledStateMutex.Lock()
     defer state.ledStateMutex.Unlock()
 
-    // Nombre maximal de LEDs à afficher, basé sur votre logique (170 entités par univers).
-    const maxLeds = 170
+    ledWidgetSize := fyne.NewSize(14, 14)
 
     // --- Panneau de Gauche (Entrée eHub) ---
-    inputGrid := container.New(layout.NewGridLayout(32))
-    state.ledInputWidgets = make([]*LedWidget, 0, maxLeds)
-    for i := 0; i < maxLeds; i++ {
+    inputLedObjects := make([]fyne.CanvasObject, ledCount)
+    state.ledInputWidgets = make([]*LedWidget, 0, ledCount)
+    for i := 0; i < ledCount; i++ {
         led := NewLedWidget()
-        inputGrid.Add(led)
         state.ledInputWidgets = append(state.ledInputWidgets, led)
+        inputLedObjects[i] = led
     }
+    inputGrid := container.New(layout.NewGridWrapLayout(ledWidgetSize), inputLedObjects...)
+    inputScroll := container.NewScroll(inputGrid)
+    inputColumn := container.NewBorder(
+        widget.NewLabelWithStyle("Entrée eHub", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+        nil, nil, nil,
+        inputScroll,
+    )
 
     // --- Panneau de Droite (Sortie Art-Net) ---
-    outputGrid := container.New(layout.NewGridLayout(32))
-    state.ledOutputWidgets = make([]*LedWidget, 0, maxLeds)
-    for i := 0; i < maxLeds; i++ {
+    outputLedObjects := make([]fyne.CanvasObject, ledCount)
+    state.ledOutputWidgets = make([]*LedWidget, 0, ledCount)
+    for i := 0; i < ledCount; i++ {
         led := NewLedWidget()
-        outputGrid.Add(led)
         state.ledOutputWidgets = append(state.ledOutputWidgets, led)
+        outputLedObjects[i] = led
     }
+    outputGrid := container.New(layout.NewGridWrapLayout(ledWidgetSize), outputLedObjects...)
+    outputScroll := container.NewScroll(outputGrid)
+    outputColumn := container.NewBorder(
+        widget.NewLabelWithStyle("Sortie Art-Net", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+        nil, nil, nil,
+        outputScroll,
+    )
 
     // --- Assemblage final ---
-    // On retourne le conteneur principal qui sera stocké dans state.universeViewContent
-    return container.New(layout.NewGridLayout(2),
-        container.NewBorder(
-            widget.NewLabelWithStyle("Entrée eHub", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-            nil, nil, nil,
-            container.NewScroll(inputGrid),
-        ),
-        container.NewBorder(
-            widget.NewLabelWithStyle("Sortie Art-Net", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-            nil, nil, nil,
-            container.NewScroll(outputGrid),
+    leftSideWithSeparator := container.NewBorder(nil, nil, nil, widget.NewSeparator(), inputColumn)
+    return container.NewPadded(
+        container.New(layout.NewGridLayout(2),
+            leftSideWithSeparator,
+            outputColumn,
         ),
     )
 }
 
-// --- WIDGETS PERSONNALISÉS ET AUTRES VUES (INCHANGÉS) ---
+// --- WIDGETS PERSONNALISÉS ET AUTRES VUES ---
 
 type LedWidget struct {
     widget.BaseWidget
@@ -72,7 +77,7 @@ func NewLedWidget() *LedWidget {
 }
 
 func (w *LedWidget) MinSize() fyne.Size {
-    return fyne.NewSize(12, 12)
+    return fyne.NewSize(14, 14)
 }
 
 func (w *LedWidget) SetColor(c color.Color) {
@@ -104,9 +109,11 @@ func buildHeader(state *UIState, controller *UIController) fyne.CanvasObject {
     title := widget.NewLabel("Inspecteur Art'Hetic")
     title.TextStyle.Bold = true
     var headerContent fyne.CanvasObject
+    // La condition d'affichage du bouton reste la même.
     if state.CurrentView == DetailView || state.CurrentView == UniverseView {
+        // Le bouton appelle maintenant la nouvelle fonction intelligente GoBack().
         backButton := widget.NewButtonWithIcon("Retour", theme.NavigateBackIcon(), func() {
-            controller.GoBackToIPList()
+            controller.GoBack()
         })
         headerContent = container.NewBorder(nil, nil, backButton, nil, title)
     } else {

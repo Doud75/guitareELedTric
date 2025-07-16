@@ -2,7 +2,7 @@
 package ui
 
 import (
-    "fyne.io/fyne/v2" // Importer fyne pour fyne.CanvasObject
+    "fyne.io/fyne/v2"
     "guitarHetic/internal/config"
     "sync"
 )
@@ -11,7 +11,6 @@ import (
 type ViewName string
 
 const (
-    // Nos trois vues possibles dans l'application.
     IPListView   ViewName = "ip_list"
     DetailView   ViewName = "detail"
     UniverseView ViewName = "universe_view"
@@ -29,15 +28,13 @@ type UIState struct {
     selectedDetails  []UniRange
     selectedUniverse int
 
+    // CHANGEMENT: Ajout d'une pile pour gérer l'historique de navigation.
+    viewStack []ViewName
+
     // --- Données et widgets pour la vue de monitoring ---
-    // Le Mutex protège l'accès aux slices de widgets lors de leur création/destruction.
-    ledStateMutex sync.RWMutex
-
-    // CHANGEMENT: On stocke les widgets eux-mêmes, et non plus les couleurs.
-    ledInputWidgets  []*LedWidget
-    ledOutputWidgets []*LedWidget
-
-    // CHANGEMENT: On garde une référence au contenu de la vue pour pouvoir le rafraîchir.
+    ledStateMutex       sync.RWMutex
+    ledInputWidgets     []*LedWidget
+    ledOutputWidgets    []*LedWidget
     universeViewContent fyne.CanvasObject
 }
 
@@ -47,6 +44,7 @@ func NewUIState(cfg *config.Config) *UIState {
     return &UIState{
         allControllers: ctrlMap,
         controllerIPs:  ips,
-        CurrentView:    IPListView,
+        CurrentView:    IPListView,          // La vue de départ
+        viewStack:      make([]ViewName, 0), // Initialisation de la pile vide
     }
 }
