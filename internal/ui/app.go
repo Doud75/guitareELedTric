@@ -10,14 +10,22 @@ import (
     "guitarHetic/internal/simulator"
 )
 
-// RunUI initialise et lance l'application graphique.
-func RunUI(cfg *config.Config, physicalConfigOut chan<- *config.Config, faker *simulator.Faker) {
+// RunUI initialise et lance l'application graphique Fyne.
+// C'est le point d'entrée principal de l'interface utilisateur.
+func RunUI(
+    cfg *config.Config,
+    physicalConfigOut chan<- *config.Config,
+    faker *simulator.Faker,
+// Le canal de monitoring est maintenant passé en argument depuis main.go
+    monitorChanIn <-chan *UniverseMonitorData,
+) {
+    // Initialisation standard de l'application Fyne
     a := app.New()
     a.Settings().SetTheme(&ArtHeticTheme{})
     w := a.NewWindow("Guitare Hetic - Inspecteur ArtNet")
 
     state := NewUIState(cfg)
-    controller := NewUIController(state, cfg, physicalConfigOut, a, faker)
+    controller := NewUIController(state, cfg, physicalConfigOut, a, faker, monitorChanIn)
 
     mainMenu := buildMainMenu(controller)
     w.SetMainMenu(mainMenu)
@@ -30,6 +38,9 @@ func RunUI(cfg *config.Config, physicalConfigOut chan<- *config.Config, faker *s
             viewContent = buildIPListView(state, controller)
         case DetailView:
             viewContent = buildDetailView(state, controller)
+        case UniverseView:
+            viewContent = state.universeViewContent
+
         default:
             viewContent = widget.NewLabel("Erreur : Vue inconnue")
         }
@@ -48,7 +59,7 @@ func RunUI(cfg *config.Config, physicalConfigOut chan<- *config.Config, faker *s
     controller.SetUpdateCallback(buildAndUpdateView)
     buildAndUpdateView()
 
-    w.Resize(fyne.NewSize(800, 600))
+    w.Resize(fyne.NewSize(1024, 768))
     w.SetCloseIntercept(func() {
         controller.QuitApp()
     })
@@ -57,30 +68,28 @@ func RunUI(cfg *config.Config, physicalConfigOut chan<- *config.Config, faker *s
 }
 
 func buildMainMenu(controller *UIController) *fyne.MainMenu {
-	// Menu "Fichier" (inchangé)
-	fileMenu := fyne.NewMenu("Art'hetic",
-		fyne.NewMenuItem("Quitter", func() {
-			controller.QuitApp()
-		}),
-	)
+    fileMenu := fyne.NewMenu("Art'hetic",
+        fyne.NewMenuItem("Quitter", func() {
+            controller.QuitApp()
+        }),
+    )
 
-	// --- Menu "Faker" avec la nouvelle option ---
+    // Sous-menu pour les couleurs unies du Faker
+    solidColorItem := fyne.NewMenuItem("Couleur Unie", nil)
+    solidColorItem.ChildMenu = fyne.NewMenu("",
+        fyne.NewMenuItem("Blanc", func() { controller.RunFakerCommand("white") }),
+        fyne.NewMenuItem("Rouge", func() { controller.RunFakerCommand("red") }),
+        fyne.NewMenuItem("Vert", func() { controller.RunFakerCommand("green") }),
+        fyne.NewMenuItem("Bleu", func() { controller.RunFakerCommand("blue") }),
+        fyne.NewMenuItemSeparator(),
+        fyne.NewMenuItem("Noir (Éteindre)", func() { controller.RunFakerCommand("black") }),
+    )
 
-	solidColorItem := fyne.NewMenuItem("Couleur Unie", nil)
-	solidColorItem.ChildMenu = fyne.NewMenu("",
-		fyne.NewMenuItem("Blanc", func() { controller.RunFakerCommand("white") }),
-		fyne.NewMenuItem("Rouge", func() { controller.RunFakerCommand("red") }),
-		fyne.NewMenuItem("Vert", func() { controller.RunFakerCommand("green") }),
-		fyne.NewMenuItem("Bleu", func() { controller.RunFakerCommand("blue") }),
-		fyne.NewMenuItemSeparator(),
-		fyne.NewMenuItem("Noir (Éteindre)", func() { controller.RunFakerCommand("black") }),
-	)
-
-	animationsItem := fyne.NewMenuItem("Animations", nil)
-	animationsItem.ChildMenu = fyne.NewMenu("",
-		fyne.NewMenuItem("Vague Animée", func() { controller.RunFakerCommand("animation") }),
-		fyne.NewMenuItem("Arrêter l'animation", func() { controller.RunFakerCommand("stop") }),
-	)
+    animationsItem := fyne.NewMenuItem("Animations", nil)
+    animationsItem.ChildMenu = fyne.NewMenu("",
+        fyne.NewMenuItem("Vague Animée", func() { controller.RunFakerCommand("animation") }),
+        fyne.NewMenuItem("Arrêter l'animation", func() { controller.RunFakerCommand("stop") }),
+    )
 
 	// On assemble le menu "Faker".
 	fakerMenu := fyne.NewMenu("Faker",

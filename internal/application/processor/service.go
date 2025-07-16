@@ -1,12 +1,15 @@
+// internal/application/processor/service.go
 package processor
 
 import (
-	"log"
-	"reflect"
-	"sync"
-	"guitarHetic/internal/config"
-	"guitarHetic/internal/domain/artnet"
-	"guitarHetic/internal/domain/ehub"
+    "guitarHetic/internal/ui"
+    "log"
+    "reflect"
+    "sync" // Importé pour sync.Pool
+
+    "guitarHetic/internal/config"
+    "guitarHetic/internal/domain/artnet"
+    "guitarHetic/internal/domain/ehub"
 )
 
 type DestinationChannel chan<- artnet.LEDMessage
@@ -27,13 +30,15 @@ type Service struct {
 	lastUsedConfigMsg  *ehub.EHubConfigMsg
 	lastPhysicalConfig *config.Config
 	persistentStates   map[int]*[512]byte
-	stateMutex         sync.Mutex // Un Mutex simple est suffisant ici
+	stateMutex         sync.Mutex
+    monitorOut         chan<- *ui.UniverseMonitorData
 }
 
 func NewService(
-	configMsgIn <-chan *ehub.EHubConfigMsg,
-	updateMsgIn <-chan *ehub.EHubUpdateMsg,
-	dest DestinationChannel,
+    configMsgIn <-chan *ehub.EHubConfigMsg,
+    updateMsgIn <-chan *ehub.EHubUpdateMsg,
+    dest DestinationChannel,
+    monitorOut chan<- *ui.UniverseMonitorData,
 ) (*Service, chan *config.Config) {
 	physicalConfigChan := make(chan *config.Config)
 	return &Service{
@@ -42,6 +47,7 @@ func NewService(
 		PhysicalConfigIn: physicalConfigChan,
 		dest:             dest,
 		persistentStates: make(map[int]*[512]byte),
+        monitorOut:       monitorOut,
 	}, physicalConfigChan
 }
 
@@ -113,12 +119,40 @@ func (s *Service) processUpdate(updateMsg *ehub.EHubUpdateMsg) {
 		}
 		if frameData := s.persistentStates[universe]; frameData != nil {
 			// On envoie bien une copie pour que le Sender ne puisse pas modifier notre état.
-			dataToSend := *frameData 
+			dataToSend := *frameData
 			s.dest <- artnet.LEDMessage{
 				DestinationIP: ip,
 				Universe:      universe,
 				Data:          dataToSend,
 			}
+
+            relevantEntities := make([]ehub.EHubEntityState, 0)
+
+
+            for _, entity := range updateMsg.Entities {
+                entityIndex := int(entity.ID)
+                if entityIndex < len(s.routingTable) {
+                    // On vérifie si l'entité appartient bien à l'univers 'u' actuel.
+                    if s.routingTable[entityIndex].TargetUniverse == universe {
+                        relevantEntities = append(relevantEntities, entity)
+                    }
+                }
+            }
+
+            // 3. On crée le message de monitoring avec la liste FILTRÉE.
+            log.Printf("MONITOR_SEND: Envoi des données pour l'univers %d (%d entités pertinentes) vers l'UI.", universe, len(relevantEntities))
+            monitorData := &ui.UniverseMonitorData{
+                UniverseID: universe,
+                InputState: relevantEntities, // On utilise la petite liste filtrée !
+                OutputDMX:  dataToSend,
+            }
+
+            // 4. On envoie au canal de monitoring.
+            select {
+            case s.monitorOut <- monitorData:
+            default:
+                log.Println("MONITOR_WARN: Le canal de monitoring UI est plein, un paquet est ignoré.")
+            }
 		}
 	}
 }

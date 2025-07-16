@@ -1,9 +1,11 @@
+// internal/ui/controller.go
 package ui
 
 import (
     "fyne.io/fyne/v2"
     "guitarHetic/internal/config"
     "guitarHetic/internal/simulator"
+    "image/color"
     "log"
     "net"
     "sort"
@@ -13,145 +15,183 @@ import (
 type UIController struct {
     state             *UIState
     onStateChange     func()
-    currentConfig     *config.Config        // Garde une référence à la config actuelle pour la copier
-    physicalConfigOut chan<- *config.Config // Le canal pour envoyer la config mise à jour
-    app               fyne.App
+    currentConfig     *config.Config
+    physicalConfigOut chan<- *config.Config
+    app               fyne.App // Conservé pour la fonction QuitApp
     faker             *simulator.Faker
+    monitorIn         <-chan *UniverseMonitorData
 }
 
-func NewUIController(state *UIState, initialConfig *config.Config, cfgOut chan<- *config.Config, app fyne.App, faker *simulator.Faker) *UIController {
-    return &UIController{
+// NewUIController construit et initialise le contrôleur.
+func NewUIController(state *UIState, initialConfig *config.Config, cfgOut chan<- *config.Config, app fyne.App, faker *simulator.Faker, monitorIn <-chan *UniverseMonitorData) *UIController {
+    c := &UIController{
         state:             state,
         onStateChange:     func() {},
         currentConfig:     initialConfig,
         physicalConfigOut: cfgOut,
         app:               app,
         faker:             faker,
+        monitorIn:         monitorIn,
+    }
+    // On lance l'écouteur en arrière-plan.
+    go c.listenForMonitorUpdates()
+    return c
+}
+
+// listenForMonitorUpdates est la goroutine qui met à jour les widgets et demande un rafraîchissement de l'UI.
+// CETTE FONCTION EST LA CLÉ DE LA CORRECTION.
+func (c *UIController) listenForMonitorUpdates() {
+    for data := range c.monitorIn {
+        // On s'assure que la vue est active et que les widgets ont bien été créés.
+        if c.state.CurrentView != UniverseView || c.state.selectedUniverse != data.UniverseID || c.state.universeViewContent == nil {
+            continue
+        }
+
+        // Préparation des données (on peut le faire en dehors du fyne.Do)
+        inputColors := make([]color.Color, len(c.state.ledInputWidgets))
+        for i := range inputColors {
+            if i < len(data.InputState) {
+                entity := data.InputState[i]
+                inputColors[i] = color.NRGBA{R: entity.Red, G: entity.Green, B: entity.Blue, A: 255}
+            } else {
+                inputColors[i] = color.Black
+            }
+        }
+
+        outputColors := make([]color.Color, len(c.state.ledOutputWidgets))
+        for i := range outputColors {
+            offset := i * 3
+            if offset+2 < len(data.OutputDMX) {
+                r, g, b := data.OutputDMX[offset], data.OutputDMX[offset+1], data.OutputDMX[offset+2]
+                outputColors[i] = color.NRGBA{R: r, G: g, B: b, A: 255}
+            } else {
+                outputColors[i] = color.Black
+            }
+        }
+
+        // CORRECTION: On exécute TOUTES les modifications de l'UI dans fyne.Do
+        fyne.Do(func() {
+            c.state.ledStateMutex.RLock()
+            defer c.state.ledStateMutex.RUnlock()
+
+            // On vérifie que les widgets n'ont pas été détruits entre-temps
+            if c.state.ledInputWidgets == nil || c.state.ledOutputWidgets == nil {
+                return
+            }
+
+            log.Printf("UI FYNE.DO: Mise à jour des couleurs pour l'univers %d", data.UniverseID)
+
+            // Mise à jour des widgets d'entrée (eHub)
+            for i, widget := range c.state.ledInputWidgets {
+                widget.SetColor(inputColors[i])
+            }
+
+            // Mise à jour des widgets de sortie (Art-Net)
+            for i, widget := range c.state.ledOutputWidgets {
+                widget.SetColor(outputColors[i])
+            }
+        })
     }
 }
 
-// SetUpdateCallback permet à la vue de s'enregistrer pour les mises à jour.
+// SetUpdateCallback permet à l'UI de s'enregistrer pour les changements de vue.
 func (c *UIController) SetUpdateCallback(callback func()) {
     c.onStateChange = callback
 }
 
+// SelectUniverseAndShowDetails prépare le changement vers la vue de monitoring.
+func (c *UIController) SelectUniverseAndShowDetails(universeID int) {
+    c.state.selectedUniverse = universeID
+
+    // CHANGEMENT: On construit la vue ici, UNE SEULE FOIS.
+    // La fonction buildUniverseView va peupler l'état avec les widgets créés.
+    c.state.universeViewContent = buildUniverseView(c.state)
+
+    c.state.CurrentView = UniverseView
+    // On déclenche le rafraîchissement global pour afficher la nouvelle vue.
+    c.onStateChange()
+}
+
 // SelectIPAndShowDetails est appelée lorsqu'un utilisateur clique sur une IP.
 func (c *UIController) SelectIPAndShowDetails(ip string) {
-    // 1. Mettre à jour l'état avec les informations de la sélection.
     c.state.selectedIP = ip
-
-    // Calculer les détails pour la vue suivante.
     entries := c.state.allControllers[ip]
     details := make([]UniRange, 0, len(entries))
     for u, ranges := range entries {
         details = append(details, UniRange{Universe: u, Ranges: ranges})
     }
-    sort.Slice(details, func(i, j int) bool {
-        return details[i].Universe < details[j].Universe
-    })
+    sort.Slice(details, func(i, j int) bool { return details[i].Universe < details[j].Universe })
     c.state.selectedDetails = details
-
-    // 2. Changer la vue actuelle pour la vue de détails.
     c.state.CurrentView = DetailView
-
-    // 3. Notifier l'interface qu'elle doit se redessiner complètement.
     c.onStateChange()
 }
 
 // GoBackToIPList est appelée par le bouton "Retour".
 func (c *UIController) GoBackToIPList() {
-    // 1. Changer la vue pour revenir à la liste.
-    c.state.CurrentView = IPListView
+    // CHANGEMENT: On nettoie l'état pour libérer la mémoire des widgets.
+    c.state.ledStateMutex.Lock()
+    c.state.ledInputWidgets = nil
+    c.state.ledOutputWidgets = nil
+    c.state.universeViewContent = nil
+    c.state.ledStateMutex.Unlock()
 
-    // (Optionnel mais propre) Réinitialiser la sélection.
+    c.state.CurrentView = IPListView
     c.state.selectedIP = ""
     c.state.selectedDetails = nil
-
-    // 2. Notifier l'interface de se redessiner.
     c.onStateChange()
 }
 
-// --- ACTIONS DU MENU ---
+// --- AUTRES FONCTIONS DU CONTRÔLEUR (inchangées) ---
 
-// QuitApp gère l'action de quitter proprement.
 func (c *UIController) QuitApp() {
     if c.faker != nil {
-        c.faker.Stop() // Arrêter les animations du faker avant de quitter.
+        c.faker.Stop()
     }
     c.app.Quit()
 }
 
-// RunFakerCommand exécute une commande de test via le Faker.
 func (c *UIController) RunFakerCommand(command string) {
     if c.faker != nil {
-        // Lancer dans une goroutine pour ne pas bloquer l'UI.
         go c.faker.SendTestPattern(command)
     }
+}
+
+func (c *UIController) ValidateNewIP(newIP string) {
+    if net.ParseIP(newIP) == nil {
+        log.Printf("UI ERROR: L'adresse IP '%s' est invalide. Abandon.", newIP)
+        return
+    }
+    oldIP := c.state.selectedIP
+    newConfig := deepCopyConfig(c.currentConfig)
+    for i, entry := range newConfig.RoutingTable {
+        if entry.IP == oldIP {
+            newConfig.RoutingTable[i].IP = newIP
+        }
+    }
+    for i, ip := range newConfig.UniverseIP {
+        if ip == oldIP {
+            newConfig.UniverseIP[i] = newIP
+        }
+    }
+    c.physicalConfigOut <- newConfig
+    c.currentConfig = newConfig
+    newIPs, newCtrlMap := BuildModel(newConfig)
+    c.state.allControllers = newCtrlMap
+    c.state.controllerIPs = newIPs
+    c.GoBackToIPList()
 }
 
 func deepCopyConfig(original *config.Config) *config.Config {
     if original == nil {
         return nil
     }
-
-    // Copier la RoutingTable
     newRoutingTable := make([]config.RoutingEntry, len(original.RoutingTable))
     copy(newRoutingTable, original.RoutingTable)
-
-    // Copier la map UniverseIP
     newUniverseIP := make(map[int]string)
     for k, v := range original.UniverseIP {
         newUniverseIP[k] = v
     }
-
-    return &config.Config{
-        RoutingTable: newRoutingTable,
-        UniverseIP:   newUniverseIP,
-    }
-}
-
-func (c *UIController) ValidateNewIP(newIP string) {
-    // 1. Valider l'entrée
-    if net.ParseIP(newIP) == nil {
-        log.Printf("UI ERROR: L'adresse IP '%s' est invalide. Abandon.", newIP)
-        // Ici, on pourrait mettre à jour l'état pour afficher une erreur à l'utilisateur.
-        return
-    }
-
-    oldIP := c.state.selectedIP
-    log.Printf("UI ACTION: Validation de la nouvelle IP '%s' pour l'ancienne '%s'", newIP, oldIP)
-
-    // 2. Créer une copie profonde de la configuration actuelle
-    newConfig := deepCopyConfig(c.currentConfig)
-
-    // 3. Modifier la copie
-    for i, entry := range newConfig.RoutingTable {
-        if entry.IP == oldIP {
-            newConfig.RoutingTable[i].IP = newIP
-        }
-    }
-    // On reconstruit la map UniverseIP pour être certain de sa cohérence
-    for i, ip := range newConfig.UniverseIP {
-        if ip == oldIP {
-            newConfig.UniverseIP[i] = newIP
-        }
-    }
-
-    // 4. Envoyer la configuration mise à jour au processeur
-    log.Println("UI ACTION: Envoi de la configuration mise à jour au processeur...")
-    c.physicalConfigOut <- newConfig
-
-    // 5. Mettre à jour l'état interne de l'UI
-    // Le contrôleur considère maintenant la nouvelle config comme la version "actuelle".
-    c.currentConfig = newConfig
-    // On met à jour l'état qui pilote les vues.
-    newIPs, newCtrlMap := BuildModel(newConfig)
-    c.state.allControllers = newCtrlMap
-    c.state.controllerIPs = newIPs
-
-    log.Println("UI ACTION: Changement appliqué. Retour à la liste.")
-    // 6. Naviguer en arrière
-    c.GoBackToIPList() // Cette méthode déclenche déjà onStateChange, donc la vue sera rafraîchie.
+    return &config.Config{RoutingTable: newRoutingTable, UniverseIP: newUniverseIP}
 }
 
 // SwitchToLiveMode demande au faker de se désactiver et de repasser l'aiguilleur

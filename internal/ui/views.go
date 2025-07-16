@@ -1,142 +1,162 @@
+// internal/ui/views.go
 package ui
 
 import (
     "fmt"
-    "fyne.io/fyne/v2/layout"
-    "strings"
-
     "fyne.io/fyne/v2"
+    "fyne.io/fyne/v2/canvas"
     "fyne.io/fyne/v2/container"
+    "fyne.io/fyne/v2/layout"
     "fyne.io/fyne/v2/theme"
     "fyne.io/fyne/v2/widget"
+    "image/color"
+    "strings"
 )
+
+// --- VUE DE MONITORING (Nouvelle version) ---
+// Construit la vue UNE SEULE FOIS et peuple l'état avec les widgets créés.
+func buildUniverseView(state *UIState) fyne.CanvasObject {
+    // On prend un verrou en écriture car on va modifier les slices de widgets dans l'état.
+    state.ledStateMutex.Lock()
+    defer state.ledStateMutex.Unlock()
+
+    // Nombre maximal de LEDs à afficher, basé sur votre logique (170 entités par univers).
+    const maxLeds = 170
+
+    // --- Panneau de Gauche (Entrée eHub) ---
+    inputGrid := container.New(layout.NewGridLayout(32))
+    state.ledInputWidgets = make([]*LedWidget, 0, maxLeds)
+    for i := 0; i < maxLeds; i++ {
+        led := NewLedWidget()
+        inputGrid.Add(led)
+        state.ledInputWidgets = append(state.ledInputWidgets, led)
+    }
+
+    // --- Panneau de Droite (Sortie Art-Net) ---
+    outputGrid := container.New(layout.NewGridLayout(32))
+    state.ledOutputWidgets = make([]*LedWidget, 0, maxLeds)
+    for i := 0; i < maxLeds; i++ {
+        led := NewLedWidget()
+        outputGrid.Add(led)
+        state.ledOutputWidgets = append(state.ledOutputWidgets, led)
+    }
+
+    // --- Assemblage final ---
+    // On retourne le conteneur principal qui sera stocké dans state.universeViewContent
+    return container.New(layout.NewGridLayout(2),
+        container.NewBorder(
+            widget.NewLabelWithStyle("Entrée eHub", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+            nil, nil, nil,
+            container.NewScroll(inputGrid),
+        ),
+        container.NewBorder(
+            widget.NewLabelWithStyle("Sortie Art-Net", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+            nil, nil, nil,
+            container.NewScroll(outputGrid),
+        ),
+    )
+}
+
+// --- WIDGETS PERSONNALISÉS ET AUTRES VUES (INCHANGÉS) ---
+
+type LedWidget struct {
+    widget.BaseWidget
+    Circle *canvas.Circle
+}
+
+func NewLedWidget() *LedWidget {
+    w := &LedWidget{Circle: &canvas.Circle{StrokeWidth: 1, StrokeColor: color.Gray{Y: 60}}}
+    w.ExtendBaseWidget(w)
+    w.SetColor(color.Black)
+    return w
+}
+
+func (w *LedWidget) MinSize() fyne.Size {
+    return fyne.NewSize(12, 12)
+}
+
+func (w *LedWidget) SetColor(c color.Color) {
+    w.Circle.FillColor = c
+    w.Refresh()
+}
+
+func (w *LedWidget) CreateRenderer() fyne.WidgetRenderer {
+    return widget.NewSimpleRenderer(w.Circle)
+}
 
 type SizedEntry struct {
     widget.Entry
     DesiredWidth float32
 }
 
-// NewSizedEntry est le constructeur pour notre widget.
 func NewSizedEntry(width float32) *SizedEntry {
     entry := &SizedEntry{DesiredWidth: width}
-    // C'est une étape essentielle pour lier notre logique custom au widget de base.
     entry.ExtendBaseWidget(entry)
     return entry
 }
 
-// MinSize est la méthode que Fyne appelle pour connaître la taille minimale.
-// C'est ici que nous imposons notre largeur.
 func (e *SizedEntry) MinSize() fyne.Size {
-    // On récupère la taille minimale d'origine pour connaître la hauteur idéale.
     originalMin := e.Entry.MinSize()
-    // On retourne une nouvelle taille avec NOTRE largeur et la hauteur d'origine.
     return fyne.NewSize(e.DesiredWidth, originalMin.Height)
 }
 
-// *** NOUVELLE FONCTION (RÉINTRODUITE ET CORRECTE) ***
-// buildHeader construit la barre de navigation en haut de la fenêtre.
 func buildHeader(state *UIState, controller *UIController) fyne.CanvasObject {
     title := widget.NewLabel("Inspecteur Art'Hetic")
     title.TextStyle.Bold = true
-
     var headerContent fyne.CanvasObject
-    if state.CurrentView == DetailView {
-        // On affiche un bouton "Retour" uniquement sur la page de détail.
+    if state.CurrentView == DetailView || state.CurrentView == UniverseView {
         backButton := widget.NewButtonWithIcon("Retour", theme.NavigateBackIcon(), func() {
             controller.GoBackToIPList()
         })
-        // On place le bouton à gauche et on laisse le titre prendre le reste de la place.
         headerContent = container.NewBorder(nil, nil, backButton, nil, title)
     } else {
-        // Sur la page d'accueil, on affiche juste le titre.
         headerContent = title
     }
-
-    // On ajoute un padding et un séparateur pour un meilleur look.
     return container.NewVBox(container.NewPadded(headerContent), widget.NewSeparator())
 }
 
-// *** VUE DE LA LISTE, VERSION 4.0 (ÉPURÉE) ***
 func buildIPListView(state *UIState, controller *UIController) fyne.CanvasObject {
     list := widget.NewList(
-        func() int {
-            return len(state.controllerIPs)
-        },
-        // Le template pour chaque item : simple, propre.
+        func() int { return len(state.controllerIPs) },
         func() fyne.CanvasObject {
-            // Un HBox pour le texte et une icône "flèche" pour indiquer l'action.
-            return container.NewBorder(
-                nil, nil, nil, widget.NewIcon(theme.NavigateNextIcon()),
-                widget.NewLabel("Template IP"),
-            )
+            return container.NewBorder(nil, nil, nil, widget.NewIcon(theme.NavigateNextIcon()), widget.NewLabel("Template IP"))
         },
-        // Mise à jour de l'item.
         func(i widget.ListItemID, o fyne.CanvasObject) {
-            ip := state.controllerIPs[i]
-            label := o.(*fyne.Container).Objects[0].(*widget.Label)
-            label.SetText(ip)
+            o.(*fyne.Container).Objects[0].(*widget.Label).SetText(state.controllerIPs[i])
         },
     )
-
     list.OnSelected = func(id widget.ListItemID) {
         controller.SelectIPAndShowDetails(state.controllerIPs[id])
         list.UnselectAll()
     }
-
-    // La liste elle-même gère son scroll, pas besoin d'en ajouter un autre.
     return list
 }
 
-// *** VUE DE DÉTAIL, VERSION 4.0 (CORRIGÉE SELON VOS DEMANDES) ***
 func buildDetailView(state *UIState, controller *UIController) fyne.CanvasObject {
-
-    // --- SECTION ÉDITION : avec notre input à taille contrôlée ---
-
-    // On utilise notre nouveau widget au lieu de widget.NewEntry().
-    // 200.0 est une bonne largeur de départ pour une IP, facilement ajustable ici.
     ipInput := NewSizedEntry(200.0)
     ipInput.SetText(state.selectedIP)
-
-    validateButton := widget.NewButtonWithIcon("Sauvegarder", theme.ConfirmIcon(), func() {
-        controller.ValidateNewIP(ipInput.Text)
-    })
+    validateButton := widget.NewButtonWithIcon("Sauvegarder", theme.ConfirmIcon(), func() { controller.ValidateNewIP(ipInput.Text) })
     validateButton.Importance = widget.HighImportance
+    editLine := container.NewHBox(widget.NewLabel("Nouvelle IP :"), ipInput, validateButton, layout.NewSpacer())
 
-    // On garde le layout HBox + Spacer, qui est correct.
-    // Maintenant que ipInput a une MinSize correcte, le layout fonctionnera comme prévu.
-    editLine := container.NewHBox(
-        widget.NewLabel("Nouvelle IP :"),
-        ipInput, // Notre widget personnalisé
-        validateButton,
-        layout.NewSpacer(), // Le spacer prendra toujours l'espace restant
-    )
-
-    // --- SECTION DONNÉES : On utilise la technique de boucle 'for' qui fonctionne ---
     universeItems := []fyne.CanvasObject{
         widget.NewLabelWithStyle("Univers & Plages d'Entités", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
     }
-
     for _, detail := range state.selectedDetails {
-        labelUnivers := widget.NewLabel(fmt.Sprintf("Univers ArtNet %d", detail.Universe))
-
-        parts := make([]string, len(detail.Ranges))
-        for i, rg := range detail.Ranges {
+        currentDetail := detail
+        monitorButton := widget.NewButton(fmt.Sprintf("Monitorer l'Univers ArtNet %d", currentDetail.Universe), func() {
+            controller.SelectUniverseAndShowDetails(currentDetail.Universe)
+        })
+        parts := make([]string, len(currentDetail.Ranges))
+        for i, rg := range currentDetail.Ranges {
             parts[i] = fmt.Sprintf("%d à %d", rg[0], rg[1])
         }
         labelRanges := widget.NewLabel(strings.Join(parts, ", "))
-
-        row := container.NewBorder(nil, nil, labelUnivers, nil, labelRanges)
+        labelRanges.Alignment = fyne.TextAlignTrailing
+        row := container.NewBorder(nil, nil, monitorButton, nil, labelRanges)
         universeItems = append(universeItems, row)
     }
-
     universeList := container.NewVBox(universeItems...)
 
-    // --- ASSEMBLAGE FINAL DE LA VUE ---
-    return container.NewScroll(
-        container.NewVBox(
-            container.NewPadded(editLine),
-            widget.NewSeparator(),
-            container.NewPadded(universeList),
-        ),
-    )
+    return container.NewScroll(container.NewVBox(container.NewPadded(editLine), widget.NewSeparator(), container.NewPadded(universeList)))
 }

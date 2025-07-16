@@ -1,11 +1,9 @@
-// main.go
 package main
 
 import (
 	"context"
 	"log"
-	
-	// Plus besoin de bufio, fmt, os, strings si on retire le contrôle par terminal
+
 	app_ehub "guitarHetic/internal/application/ehub"
 	app_processor "guitarHetic/internal/application/processor"
 	"guitarHetic/internal/config"
@@ -18,7 +16,7 @@ import (
 )
 
 func main() {
-	log.Println("Démarrage du système de routage eHuB -> ArtNet...")
+    log.Println("Démarrage du système de routage eHuB -> ArtNet...")
 
 	// --- 1. CONFIGURATION ---
 	appConfig, err := config.Load("internal/config/routing.xlsx")
@@ -26,13 +24,14 @@ func main() {
 		log.Fatalf("Erreur fatale: Impossible de charger la configuration: %v", err)
 	}
 
-	// --- 2. CANAUX ET CONTEXTE ---
-	rawPacketChannel := make(chan ehub.RawPacket, 1000)
-	configChannel := make(chan *ehub.EHubConfigMsg, 50)
-	updateChannel := make(chan *ehub.EHubUpdateMsg, 1000)
-	artnetQueue := make(chan domain_artnet.LEDMessage, 10000)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+    // --- CRÉATION DES CANAUX ET CONTEXTE ---
+    rawPacketChannel := make(chan ehub.RawPacket, 1000)
+    configChannel := make(chan *ehub.EHubConfigMsg, 50)
+    updateChannel := make(chan *ehub.EHubUpdateMsg, 1000)
+    artnetQueue := make(chan domain_artnet.LEDMessage, 10000)
+    monitorChan := make(chan *ui.UniverseMonitorData, 100)
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
 
 	// Canaux pour l'aiguilleur
 	eHubUpdateChannel := make(chan *ehub.EHubUpdateMsg, 1000)
@@ -44,7 +43,7 @@ func main() {
 	sender, _ := infra_artnet.NewSender()
 	parser := app_ehub.NewParser()
 	eHubService := app_ehub.NewService(rawPacketChannel, parser, configChannel, eHubUpdateChannel)
-	processorService, physicalConfigOut := app_processor.NewService(configChannel, updateChannel, artnetQueue)
+	processorService, physicalConfigOut := app_processor.NewService(configChannel, updateChannel, artnetQueue, monitorChan)
 	faker := simulator.NewFaker(fakerUpdateChannel, configChannel, fakerModeSwitch, appConfig)
 
 	// --- 4. DÉMARRAGE DES SERVICES BACKEND DANS DES GOROUTINES ---
@@ -83,7 +82,7 @@ func main() {
 	// L'appel à RunUI est maintenant la dernière action de la fonction main.
 	// Il va bloquer l'exécution jusqu'à ce que la fenêtre soit fermée.
 	// C'est la manière correcte de lancer une application Fyne.
-	ui.RunUI(appConfig, physicalConfigOut, faker)
+    ui.RunUI(appConfig, physicalConfigOut, faker, monitorChan)
 
 	// Ce log ne s'affichera que lorsque la fenêtre UI aura été fermée.
 	log.Println("Arrêt complet de l'application.")
