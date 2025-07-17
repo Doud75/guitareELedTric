@@ -17,7 +17,10 @@ type LedState struct {
 }
 
 type ConfigUpdateRequest struct {
-	FilePath  string
-	IPChanges map[string]string
-	ExportPath string
+    FilePath          string
+    IPChanges         map[string]string
+    ExportPath        string
+    PatchFilePath     string
+    ClearPatch        bool
+    SetPatchingActive *bool
 }

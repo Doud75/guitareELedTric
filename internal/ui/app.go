@@ -3,39 +3,31 @@ package ui
 
 import (
     "fyne.io/fyne/v2"
-    "log"
-    // "fyne.io/fyne/v2/app"
     "fyne.io/fyne/v2/canvas"
     "fyne.io/fyne/v2/container"
     "fyne.io/fyne/v2/data/binding"
     "fyne.io/fyne/v2/dialog"
     "fyne.io/fyne/v2/storage"
     "fyne.io/fyne/v2/widget"
-    // "guitarHetic/internal/config"
-    // "guitarHetic/internal/simulator"
     "image/color"
+    "log"
 )
 
 func RunUI(
     controller *UIController, // On reçoit directement le contrôleur pré-configuré
     w fyne.Window,            // On reçoit la fenêtre de l'extérieur
 ) {
-    // On ne crée plus l'app, la window, le state ou le controller ici.
-    // On se contente de construire l'interface.
-
     mainMenu := buildMainMenu(controller, w)
     w.SetMainMenu(mainMenu)
 
     buildAndUpdateView := func() {
         var viewContent fyne.CanvasObject
 
-        // Si aucune config n'est chargée, on affiche un message.
         if !controller.IsConfigLoaded() {
             viewContent = container.NewCenter(
                 widget.NewLabel("Veuillez charger un fichier de configuration via le menu 'Art'hetic' -> 'Charger...'"),
             )
         } else {
-            // Sinon, on affiche la vue normale
             switch controller.state.CurrentView {
             case IPListView:
                 viewContent = buildIPListView(controller.state, controller)
@@ -59,55 +51,44 @@ func RunUI(
     w.Resize(fyne.NewSize(1324, 768))
 }
 
+// MODIFICATION: Version la plus sûre de buildMainMenu
 func buildMainMenu(controller *UIController, parentWindow fyne.Window) *fyne.MainMenu {
     xlsxFilter := storage.NewExtensionFileFilter([]string{".xlsx"})
 
+    // --- Menu "Art'hetic" (inchangé) ---
     fileMenu := fyne.NewMenu("Art'hetic",
         fyne.NewMenuItem("Charger configuration...", func() {
             fileDialog := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
-                if err != nil {
-                    log.Printf("Erreur de dialogue de fichier: %v", err)
+                if err != nil || reader == nil {
                     return
                 }
-                if reader == nil {
-                    log.Println("Dialogue de fichier annulé.")
-                    return
-                }
-                // On passe l'URI complet au contrôleur
                 controller.LoadNewConfigFile(reader.URI())
                 reader.Close()
             }, parentWindow)
-
-            // --- MODIFICATION CLÉ ---
-            // Si on a déjà ouvert un dossier, on dit à la dialogue de démarrer là.
             if controller.state.lastOpenedFolder != nil {
                 fileDialog.SetLocation(controller.state.lastOpenedFolder)
             }
-            // --- FIN DE LA MODIFICATION ---
-
-
-            
             fileDialog.SetFilter(xlsxFilter)
             fileDialog.Show()
         }),
         fyne.NewMenuItem("Sauvegarder la configuration sous...", func() {
-			fileDialog := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
-				if err != nil || writer == nil { return }
-				controller.SaveConfigFile(writer.URI().Path())
-				writer.Close()
-			}, parentWindow)
-
-			fileDialog.SetFileName("routing_export.xlsx")
-			fileDialog.SetFilter(storage.NewExtensionFileFilter([]string{".xlsx"}))
-			fileDialog.Show()
-		}),
+            fileDialog := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+                if err != nil || writer == nil {
+                    return
+                }
+                controller.SaveConfigFile(writer.URI().Path())
+                writer.Close()
+            }, parentWindow)
+            fileDialog.SetFileName("routing_export.xlsx")
+            fileDialog.SetFilter(xlsxFilter)
+            fileDialog.Show()
+        }),
         fyne.NewMenuItem("Quitter", func() {
             controller.QuitApp()
         }),
     )
 
-    // ... (le reste du menu Faker ne change pas)
-    // On le remet ici pour être complet.
+    // --- Menu "Faker" (inchangé) ---
     showColorPicker := func() {
         r, g, b, w := binding.NewFloat(), binding.NewFloat(), binding.NewFloat(), binding.NewFloat()
         preview := canvas.NewRectangle(color.Black)
@@ -122,18 +103,14 @@ func buildMainMenu(controller *UIController, parentWindow fyne.Window) *fyne.Mai
         r.AddListener(binding.NewDataListener(updatePreview))
         g.AddListener(binding.NewDataListener(updatePreview))
         b.AddListener(binding.NewDataListener(updatePreview))
-
         content := container.NewVBox(
-            container.NewCenter(preview),
-            widget.NewSeparator(),
+            container.NewCenter(preview), widget.NewSeparator(),
             container.NewGridWithColumns(3, widget.NewLabel("Rouge"), widget.NewSliderWithData(0, 255, r), widget.NewLabelWithData(binding.FloatToStringWithFormat(r, "%.0f"))),
             container.NewGridWithColumns(3, widget.NewLabel("Vert"), widget.NewSliderWithData(0, 255, g), widget.NewLabelWithData(binding.FloatToStringWithFormat(g, "%.0f"))),
             container.NewGridWithColumns(3, widget.NewLabel("Bleu"), widget.NewSliderWithData(0, 255, b), widget.NewLabelWithData(binding.FloatToStringWithFormat(b, "%.0f"))),
             container.NewGridWithColumns(3, widget.NewLabel("Blanc"), widget.NewSliderWithData(0, 255, w), widget.NewLabelWithData(binding.FloatToStringWithFormat(w, "%.0f"))),
         )
-
-        dialog.ShowCustomConfirm(
-            "Choisir une couleur personnalisée", "Valider", "Annuler", content,
+        dialog.ShowCustomConfirm("Choisir une couleur personnalisée", "Valider", "Annuler", content,
             func(ok bool) {
                 if !ok {
                     return
@@ -143,11 +120,8 @@ func buildMainMenu(controller *UIController, parentWindow fyne.Window) *fyne.Mai
                 vb, _ := b.Get()
                 vw, _ := w.Get()
                 controller.RunFakerCustomColor(uint8(vr), uint8(vg), uint8(vb), uint8(vw))
-            },
-            parentWindow,
-        )
+            }, parentWindow)
     }
-
     solidColorItem := fyne.NewMenuItem("Couleur Unie", nil)
     solidColorItem.ChildMenu = fyne.NewMenu("",
         fyne.NewMenuItem("Blanc", func() { controller.RunFakerCommand("white") }),
@@ -159,21 +133,47 @@ func buildMainMenu(controller *UIController, parentWindow fyne.Window) *fyne.Mai
         fyne.NewMenuItemSeparator(),
         fyne.NewMenuItem("Couleur Personnalisée...", showColorPicker),
     )
-
     animationsItem := fyne.NewMenuItem("Animations", nil)
     animationsItem.ChildMenu = fyne.NewMenu("",
         fyne.NewMenuItem("Vague Animée", func() { controller.RunFakerCommand("animation") }),
         fyne.NewMenuItem("Arrêter l'animation", func() { controller.RunFakerCommand("stop") }),
     )
-
     fakerMenu := fyne.NewMenu("Faker",
-        solidColorItem,
-        animationsItem,
+        solidColorItem, animationsItem, fyne.NewMenuItemSeparator(),
+        fyne.NewMenuItem("Retour au mode LIVE (eHub)", func() { controller.SwitchToLiveMode() }),
+    )
+
+    // --- Menu "Patching" (Version ultra-simple et stable) ---
+    var isPatchingActive = false // Variable locale pour garder une trace de l'état
+
+    patchMenu := fyne.NewMenu("Patching",
+        fyne.NewMenuItem("Charger un fichier de Patch (.xlsx)...", func() {
+            fileDialog := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+                if err != nil || reader == nil {
+                    return
+                }
+                controller.LoadPatchFile(reader.URI())
+                reader.Close()
+            }, parentWindow)
+            fileDialog.SetFilter(xlsxFilter)
+            fileDialog.Show()
+        }),
+        fyne.NewMenuItem("Vider le Patch actuel", func() {
+            controller.ClearPatch()
+        }),
         fyne.NewMenuItemSeparator(),
-        fyne.NewMenuItem("Retour au mode LIVE (eHub)", func() {
-            controller.SwitchToLiveMode()
+        fyne.NewMenuItem("Activer/Désactiver le Patching", func() {
+            // On bascule l'état et on informe le contrôleur
+            isPatchingActive = !isPatchingActive
+            controller.SetPatchingActive(isPatchingActive)
+            if isPatchingActive {
+                log.Println("UI: Commande 'Activer Patching' envoyée.")
+            } else {
+                log.Println("UI: Commande 'Désactiver Patching' envoyée.")
+            }
         }),
     )
 
-    return fyne.NewMainMenu(fileMenu, fakerMenu)
+    // --- ASSEMBLAGE DU MENU PRINCIPAL ---
+    return fyne.NewMainMenu(fileMenu, fakerMenu, patchMenu)
 }
