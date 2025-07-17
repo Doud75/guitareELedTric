@@ -1,4 +1,3 @@
-// internal/infrastructure/artnet/sender.go
 package artnet
 
 import (
@@ -10,14 +9,12 @@ import (
     "sync"
 )
 
-// Sender est maintenant un expéditeur sans état.
 type Sender struct {
-    conn        *net.UDPConn // Une seule connexion pour envoyer, comme une "poste"
-    headerCache *sync.Map    // Cache thread-safe pour les en-têtes
+    conn        *net.UDPConn
+    headerCache *sync.Map
 }
 
 func NewSender() (*Sender, error) {
-    // On crée une connexion sortante générique, sans destination fixe.
     conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
     if err != nil {
         return nil, fmt.Errorf("impossible de créer la connexion UDP sortante: %w", err)
@@ -50,7 +47,6 @@ func (s *Sender) Run(ctx context.Context, in <-chan domainArtnet.LEDMessage) {
         case <-ctx.Done():
             return
         case msg := <-in:
-            // La destination est maintenant dans le message !
             destAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", msg.DestinationIP, 6454))
             if err != nil {
                 log.Printf("ArtNet Sender: Adresse IP invalide '%s': %v", msg.DestinationIP, err)
@@ -63,7 +59,6 @@ func (s *Sender) Run(ctx context.Context, in <-chan domainArtnet.LEDMessage) {
             copy(packet[0:18], header)
             copy(packet[18:], msg.Data[:])
 
-            // On envoie le paquet à la destination spécifiée dans le message.
             _, err = s.conn.WriteToUDP(packet, destAddr)
             if err != nil {
                 log.Printf("ArtNet Sender: Erreur envoi vers %s (Univers %d): %v", msg.DestinationIP, msg.Universe, err)
