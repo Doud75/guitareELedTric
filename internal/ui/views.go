@@ -2,15 +2,16 @@
 package ui
 
 import (
-    "fmt"
-    "fyne.io/fyne/v2"
-    "fyne.io/fyne/v2/canvas"
-    "fyne.io/fyne/v2/container"
-    "fyne.io/fyne/v2/layout"
-    "fyne.io/fyne/v2/theme"
-    "fyne.io/fyne/v2/widget"
-    "image/color"
-    "strings"
+	"fmt"
+	"image/color"
+	"strings"
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/widget"
 )
 
 // --- VUE DE MONITORING (AVEC SÉPARATEUR FIXE ET ESPACEMENT) ---
@@ -140,30 +141,72 @@ func buildIPListView(state *UIState, controller *UIController) fyne.CanvasObject
 }
 
 func buildDetailView(state *UIState, controller *UIController) fyne.CanvasObject {
-    ipInput := NewSizedEntry(200.0)
-    ipInput.SetText(state.selectedIP)
-    validateButton := widget.NewButtonWithIcon("Sauvegarder", theme.ConfirmIcon(), func() { controller.ValidateNewIP(ipInput.Text) })
-    validateButton.Importance = widget.HighImportance
-    editLine := container.NewHBox(widget.NewLabel("Nouvelle IP :"), ipInput, validateButton, layout.NewSpacer())
+	ipInputGlobal := NewSizedEntry(200.0)
+	ipInputGlobal.SetText(state.selectedIP)
+	validateButtonGlobal := widget.NewButtonWithIcon("Sauvegarder Tout", theme.ConfirmIcon(), func() { 
+        controller.ValidateNewIP(ipInputGlobal.Text) 
+    })
+	validateButtonGlobal.Importance = widget.HighImportance
+	editLineGlobal := container.NewHBox(widget.NewLabel("Nouvelle IP pour tout le contrôleur :"), ipInputGlobal, validateButtonGlobal, layout.NewSpacer())
 
-    universeItems := []fyne.CanvasObject{
-        widget.NewLabelWithStyle("Univers & Plages d'Entités", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-    }
-    for _, detail := range state.selectedDetails {
-        currentDetail := detail
-        monitorButton := widget.NewButton(fmt.Sprintf("Monitorer l'Univers ArtNet %d", currentDetail.Universe), func() {
-            controller.SelectUniverseAndShowDetails(currentDetail.Universe)
-        })
-        parts := make([]string, len(currentDetail.Ranges))
-        for i, rg := range currentDetail.Ranges {
-            parts[i] = fmt.Sprintf("%d à %d", rg[0], rg[1])
-        }
-        labelRanges := widget.NewLabel(strings.Join(parts, ", "))
-        labelRanges.Alignment = fyne.TextAlignTrailing
-        row := container.NewBorder(nil, nil, monitorButton, nil, labelRanges)
-        universeItems = append(universeItems, row)
-    }
-    universeList := container.NewVBox(universeItems...)
+	universeItems := []fyne.CanvasObject{
+		widget.NewLabelWithStyle("Univers & Plages d'Entités", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+	}
+	for _, detail := range state.selectedDetails {
+		currentDetail := detail
 
-    return container.NewScroll(container.NewVBox(container.NewPadded(editLine), widget.NewSeparator(), container.NewPadded(universeList)))
+		
+		parts := make([]string, len(currentDetail.Ranges))
+		for i, rg := range currentDetail.Ranges {
+			parts[i] = fmt.Sprintf("%d à %d", rg[0], rg[1])
+		}
+		labelRanges := widget.NewLabel(fmt.Sprintf("Univers %d (%s)", currentDetail.Universe, strings.Join(parts, ", ")))
+
+        monitorButton := widget.NewButton("Monitorer", func() {
+			controller.SelectUniverseAndShowDetails(currentDetail.Universe)
+		})
+
+		var ipDialog dialog.Dialog
+		ipInput := NewSizedEntry(200.0)
+
+		dialogContent := container.NewVBox(
+			widget.NewLabel(fmt.Sprintf("Entrez la nouvelle IP pour l'univers %d", currentDetail.Universe)),
+			ipInput,
+		)
+
+		ipDialog = dialog.NewCustomConfirm(
+			"Modifier l'IP de l'univers", 
+			"Sauvegarder",               
+			"Annuler",                    
+			dialogContent,
+			func(confirm bool) {
+				if !confirm {
+					return
+				}
+				controller.ValidateNewIPForUniverse(currentDetail.Universe, ipInput.Text)
+			},
+			fyne.CurrentApp().Driver().AllWindows()[0], // La fenêtre parente
+		)
+
+		editIPButton := widget.NewButtonWithIcon("", theme.SettingsIcon(), func() {
+			ipInput.SetText(controller.state.selectedIP)
+			ipDialog.Show()
+		})
+
+
+		row := container.NewBorder(
+			nil, nil, 
+			labelRanges, 
+			container.NewHBox(editIPButton, monitorButton), 
+		)
+
+		universeItems = append(universeItems, row)
+	}
+	universeList := container.NewVBox(universeItems...)
+
+	return container.NewScroll(container.NewVBox(
+        container.NewPadded(editLineGlobal), 
+        widget.NewSeparator(), 
+        container.NewPadded(universeList),
+    ))
 }
