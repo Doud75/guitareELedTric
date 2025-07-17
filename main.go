@@ -17,10 +17,7 @@ import (
 	"guitarHetic/internal/ui"
 )
 
-type ConfigUpdateRequest struct {
-	FilePath  string
-	IPChanges map[string]string
-}
+
 
 func main() {
 	log.Println("Démarrage du système...")
@@ -30,7 +27,7 @@ func main() {
 
 	// --- CANAUX DE COMMUNICATION ---
 	// Ces canaux sont créés une seule fois et vivent aussi longtemps que l'application.
-	configRequestChannel := make(chan ConfigUpdateRequest, 1)
+	configRequestChannel := make(chan ui.ConfigUpdateRequest, 1)
 	fakerModeSwitch := make(chan bool)
 	eHubUpdateChannel := make(chan *ehub.EHubUpdateMsg, 1000)
 	fakerUpdateChannel := make(chan *ehub.EHubUpdateMsg, 1000)
@@ -42,11 +39,8 @@ func main() {
 	a := app.New()
 	a.Settings().SetTheme(&ui.ArtHeticTheme{})
 	w := a.NewWindow("Guitare Hetic - Inspecteur ArtNet")
-	uiController := ui.NewUIController(a, faker, monitorChan, func(filePath string, ipChanges map[string]string) {
-		configRequestChannel <- ConfigUpdateRequest{
-			FilePath:  filePath,
-			IPChanges: ipChanges,
-		}
+	uiController := ui.NewUIController(a, faker, monitorChan, func(req ui.ConfigUpdateRequest) {
+		configRequestChannel <- req
 	})
 	ui.RunUI(uiController, w)
 
@@ -89,6 +83,16 @@ func main() {
 							}
 						}
 					}
+				}
+
+				if req.ExportPath != "" && currentConfig != nil {
+					log.Printf("Gestionnaire de Config: Exportation de la configuration vers %s", req.ExportPath)
+					if err := config.Save(currentConfig, req.ExportPath); err != nil {
+						log.Printf("ERREUR: Impossible de sauvegarder la configuration: %v", err)
+					} else {
+						log.Println("Gestionnaire de Config: Sauvegarde réussie.")
+					}
+					continue // On ne relance pas le pipeline pour une sauvegarde
 				}
 				
 				faker = simulator.NewFaker(fakerUpdateChannel, fakerConfigOut, fakerModeSwitch, currentConfig)

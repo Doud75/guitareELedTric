@@ -85,9 +85,22 @@ func buildMainMenu(controller *UIController, parentWindow fyne.Window) *fyne.Mai
             }
             // --- FIN DE LA MODIFICATION ---
 
+
+            
             fileDialog.SetFilter(xlsxFilter)
             fileDialog.Show()
         }),
+        fyne.NewMenuItem("Sauvegarder la configuration sous...", func() {
+			fileDialog := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+				if err != nil || writer == nil { return }
+				controller.SaveConfigFile(writer.URI().Path())
+				writer.Close()
+			}, parentWindow)
+
+			fileDialog.SetFileName("routing_export.xlsx")
+			fileDialog.SetFilter(storage.NewExtensionFileFilter([]string{".xlsx"}))
+			fileDialog.Show()
+		}),
         fyne.NewMenuItem("Quitter", func() {
             controller.QuitApp()
         }),

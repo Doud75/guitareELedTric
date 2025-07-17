@@ -15,3 +15,9 @@ type LedState struct {
     InputColors  []color.Color
     OutputColors []color.Color
 }
+
+type ConfigUpdateRequest struct {
+	FilePath  string
+	IPChanges map[string]string
+	ExportPath string
+}
