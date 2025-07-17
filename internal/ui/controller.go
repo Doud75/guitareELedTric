@@ -3,6 +3,7 @@ package ui
 
 import (
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/storage" 
 	"guitarHetic/internal/config"
 	"guitarHetic/internal/simulator"
 	"image/color"
@@ -39,6 +40,15 @@ func NewUIController(app fyne.App, faker *simulator.Faker, monitorIn <-chan *Uni
 	return c
 }
 
+// NOUVELLE MÉTHODE
+// SetFaker permet de mettre à jour la référence du faker de manière thread-safe.
+func (c *UIController) SetFaker(newFaker *simulator.Faker) {
+	// On pourrait ajouter un mutex ici si nécessaire, mais pour une simple
+	// assignation de pointeur, ce n'est généralement pas un problème.
+	c.faker = newFaker
+}
+
+
 // IsConfigLoaded permet à l'UI de savoir si elle doit afficher l'écran d'accueil ou la liste d'IP.
 func (c *UIController) IsConfigLoaded() bool {
 	return c.isConfigLoaded
@@ -65,11 +75,23 @@ func (c *UIController) UpdateWithNewConfig(cfg *config.Config) {
 }
 
 // LoadNewConfigFile est appelée depuis le menu de l'UI.
-func (c *UIController) LoadNewConfigFile(path string) {
-	log.Printf("UI Controller: Demande de chargement du fichier: %s", path)
-	c.configRequester(path, nil) // On utilise le callback
-}
+func (c *UIController) LoadNewConfigFile(uri fyne.URI) {
+	log.Printf("UI Controller: Demande de chargement du fichier: %s", uri.Path())
 
+	// On stocke le répertoire parent de l'URI sélectionné.
+	parent, err := storage.Parent(uri)
+	if err == nil {
+		// --- CORRECTION ---
+		// On fait une "type assertion" pour convertir le fyne.URI en fyne.ListableURI.
+		// On vérifie aussi que la conversion a réussi avec la variable 'ok'.
+		if listableParent, ok := parent.(fyne.ListableURI); ok {
+			c.state.lastOpenedFolder = listableParent
+		}
+		// --- FIN DE LA CORRECTION ---
+	}
+
+	c.configRequester(uri.Path(), nil) // On envoie toujours le chemin au backend.
+}
 // ValidateNewIP est appelée par le bouton "Sauvegarder" dans la vue de détail.
 func (c *UIController) ValidateNewIP(newIPStr string) {
 	if net.ParseIP(newIPStr) == nil {

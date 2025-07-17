@@ -25,22 +25,20 @@ type ConfigUpdateRequest struct {
 func main() {
 	log.Println("Démarrage du système...")
 
-	// --- CONTEXTE GLOBAL ---
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// --- CANAUX DE COMMUNICATION ---
+	// Ces canaux sont créés une seule fois et vivent aussi longtemps que l'application.
 	configRequestChannel := make(chan ConfigUpdateRequest, 1)
 	fakerModeSwitch := make(chan bool)
 	eHubUpdateChannel := make(chan *ehub.EHubUpdateMsg, 1000)
 	fakerUpdateChannel := make(chan *ehub.EHubUpdateMsg, 1000)
 	fakerConfigOut := make(chan *ehub.EHubConfigMsg, 50)
-	monitorChan := make(chan *ui.UniverseMonitorData, 100)
+	monitorChan := make(chan *ui.UniverseMonitorData, 100) // LE CANAL DE MONITORING EST ICI
 
-	// --- INITIALISATION DES COMPOSANTS SANS CONFIG ---
-	faker := simulator.NewFaker(fakerUpdateChannel, fakerConfigOut, fakerModeSwitch, nil)
+	var faker *simulator.Faker = nil
 
-	// --- INITIALISATION DE L'UI ---
 	a := app.New()
 	a.Settings().SetTheme(&ui.ArtHeticTheme{})
 	w := a.NewWindow("Guitare Hetic - Inspecteur ArtNet")
@@ -52,24 +50,20 @@ func main() {
 	})
 	ui.RunUI(uiController, w)
 
-	// --- GOROUTINE : GESTIONNAIRE DE CONFIGURATION ---
 	go func() {
 		var currentConfig *config.Config
-		var cancelPipeline context.CancelFunc = func() {} // Initialise avec une fonction vide
+		var cancelPipeline context.CancelFunc = func() {}
 
-		// Fonction pour arrêter proprement le pipeline de traitement
 		stopPipeline := func() {
 			log.Println("Gestionnaire de Config: Arrêt du pipeline de traitement...")
 			cancelPipeline()
 		}
 		
-		// Boucle principale du gestionnaire
 		for {
 			select {
 			case req := <-configRequestChannel:
-				stopPipeline() // On arrête toujours l'ancien pipeline
+				stopPipeline()
 
-				// CAS 1: Chargement depuis un fichier
 				if req.FilePath != "" {
 					log.Printf("Gestionnaire de Config: Chargement du fichier %s", req.FilePath)
 					newConfig, err := config.Load(req.FilePath)
@@ -81,17 +75,14 @@ func main() {
 					}
 				}
 
-				// CAS 2: Modification d'IP en mémoire
 				if req.IPChanges != nil && currentConfig != nil {
 					log.Printf("Gestionnaire de Config: Application des changements d'IP: %v", req.IPChanges)
 					for oldIP, newIP := range req.IPChanges {
-						// On modifie la table de routage
 						for i, entry := range currentConfig.RoutingTable {
 							if entry.IP == oldIP {
 								currentConfig.RoutingTable[i].IP = newIP
 							}
 						}
-						// On modifie la map des univers
 						for u, ip := range currentConfig.UniverseIP {
 							if ip == oldIP {
 								currentConfig.UniverseIP[u] = newIP
@@ -99,15 +90,16 @@ func main() {
 						}
 					}
 				}
-
-				// Mise à jour des composants dépendants
+				
 				faker = simulator.NewFaker(fakerUpdateChannel, fakerConfigOut, fakerModeSwitch, currentConfig)
+				uiController.SetFaker(faker)
+				
 				uiController.UpdateWithNewConfig(currentConfig)
 
-				// Redémarrage du pipeline si la config est valide
 				if currentConfig != nil {
 					pipelineCtx, cancelFunc := context.WithCancel(ctx)
 					cancelPipeline = cancelFunc
+					// ON PASSE LE CANAL DE MONITORING GLOBAL À CHAQUE NOUVEAU PIPELINE
 					startPipeline(pipelineCtx, currentConfig, monitorChan, eHubUpdateChannel, fakerUpdateChannel, fakerConfigOut, fakerModeSwitch)
 				}
 
@@ -118,14 +110,13 @@ func main() {
 		}
 	}()
 
-	// --- DÉMARRAGE DE L'UI SUR LE THREAD PRINCIPAL ---
 	log.Println("Système démarré. En attente du chargement d'une configuration via l'UI...")
 	w.ShowAndRun()
 
 	log.Println("Arrêt complet de l'application.")
 }
 
-// startPipeline initialise et lance tous les services de traitement de données.
+// startPipeline PREND MAINTENANT LE CANAL DE MONITORING EN ARGUMENT
 func startPipeline(ctx context.Context, cfg *config.Config, monitorChan chan *ui.UniverseMonitorData, eHubUpdateOut, fakerUpdateOut chan *ehub.EHubUpdateMsg, fakerConfigOut chan *ehub.EHubConfigMsg, fakerModeSwitch chan bool) {
 	log.Println("Pipeline: Démarrage des services...")
 	
@@ -140,10 +131,10 @@ func startPipeline(ctx context.Context, cfg *config.Config, monitorChan chan *ui
 	listener, _ := infra_ehub.NewListener(8765, rawPacketChannel)
 	parser := app_ehub.NewParser()
 	eHubService := app_ehub.NewService(rawPacketChannel, parser, eHubConfigOut, eHubUpdateOut)
+	// LE PROCESSOR UTILISE LE CANAL DE MONITORING PASSÉ EN ARGUMENT
 	processorService, physicalConfigOut := app_processor.NewService(finalConfigIn, finalUpdateIn, artnetQueue, monitorChan)
 	sender, _ := infra_artnet.NewSender()
 
-	// Aiguilleur
 	go func() {
 		isFakerActive := false
 		log.Println("Aiguilleur: Démarré en mode LIVE.")
@@ -169,12 +160,10 @@ func startPipeline(ctx context.Context, cfg *config.Config, monitorChan chan *ui
 		}
 	}()
 
-	// Démarrage des services
 	listener.Start(ctx)
 	eHubService.Start()
 	processorService.Start()
 	go sender.Run(ctx, artnetQueue)
 
-	// Injection de la config physique initiale
 	physicalConfigOut <- cfg
 }

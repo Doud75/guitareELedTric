@@ -36,6 +36,8 @@ type UIState struct {
     ledInputWidgets     []*LedWidget
     ledOutputWidgets    []*LedWidget
     universeViewContent fyne.CanvasObject
+    lastOpenedFolder fyne.ListableURI
+
 }
 
 // NewUIState initialise l'état de l'application.

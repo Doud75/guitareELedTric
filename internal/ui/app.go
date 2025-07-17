@@ -3,6 +3,7 @@ package ui
 
 import (
 	"fyne.io/fyne/v2"
+	"log"
 	// "fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
@@ -59,28 +60,41 @@ func RunUI(
 }
 
 func buildMainMenu(controller *UIController, parentWindow fyne.Window) *fyne.MainMenu {
-		xlsxFilter := storage.NewExtensionFileFilter([]string{".xlsx"})
+	xlsxFilter := storage.NewExtensionFileFilter([]string{".xlsx"})
 
 	fileMenu := fyne.NewMenu("Art'hetic",
-		// NOUVEL ITEM DE MENU
 		fyne.NewMenuItem("Charger configuration...", func() {
-			// Ouvre une boîte de dialogue de sélection de fichier
 			fileDialog := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
-				if err != nil || reader == nil {
-					return // Erreur ou annulation
+				if err != nil {
+					log.Printf("Erreur de dialogue de fichier: %v", err)
+					return
 				}
-				// On envoie le chemin (URI) au contrôleur pour qu'il gère le chargement.
-				controller.LoadNewConfigFile(reader.URI().Path())
+				if reader == nil {
+					log.Println("Dialogue de fichier annulé.")
+					return
+				}
+				// On passe l'URI complet au contrôleur
+				controller.LoadNewConfigFile(reader.URI())
 				reader.Close()
 			}, parentWindow)
+
+			// --- MODIFICATION CLÉ ---
+			// Si on a déjà ouvert un dossier, on dit à la dialogue de démarrer là.
+			if controller.state.lastOpenedFolder != nil {
+				fileDialog.SetLocation(controller.state.lastOpenedFolder)
+			}
+			// --- FIN DE LA MODIFICATION ---
 			
-			fileDialog.SetFilter(xlsxFilter) // Appliquer le filtre
+			fileDialog.SetFilter(xlsxFilter)
 			fileDialog.Show()
 		}),
 		fyne.NewMenuItem("Quitter", func() {
 			controller.QuitApp()
 		}),
 	)
+
+	// ... (le reste du menu Faker ne change pas)
+	// On le remet ici pour être complet.
 	showColorPicker := func() {
 		r, g, b, w := binding.NewFloat(), binding.NewFloat(), binding.NewFloat(), binding.NewFloat()
 		preview := canvas.NewRectangle(color.Black)
@@ -108,14 +122,11 @@ func buildMainMenu(controller *UIController, parentWindow fyne.Window) *fyne.Mai
 		dialog.ShowCustomConfirm(
 			"Choisir une couleur personnalisée", "Valider", "Annuler", content,
 			func(ok bool) {
-				if !ok {
-					return
-				}
+				if !ok { return }
 				vr, _ := r.Get()
 				vg, _ := g.Get()
 				vb, _ := b.Get()
 				vw, _ := w.Get()
-				// Appel à la nouvelle fonction du contrôleur
 				controller.RunFakerCustomColor(uint8(vr), uint8(vg), uint8(vb), uint8(vw))
 			},
 			parentWindow,
