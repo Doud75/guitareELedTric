@@ -174,6 +174,20 @@ func buildMainMenu(controller *UIController, parentWindow fyne.Window) *fyne.Mai
         }),
     )
 
+       debugMenu := fyne.NewMenu("Debug",
+        fyne.NewMenuItem("Activer le Moniteur ArtNet (logs)", func() {
+            // L'item sera coché/décoché manuellement dans le handler
+        }),
+    )
+    // On rend la case à cocher dynamique
+    debugMenu.Items[0].Checked = false
+    debugMenu.Items[0].Action = func() {
+        debugMenu.Items[0].Checked = !debugMenu.Items[0].Checked
+        controller.SetArtNetMonitoring(debugMenu.Items[0].Checked) // On appelle une nouvelle méthode du controller
+        debugMenu.Refresh()
+    }
+
+
     // --- ASSEMBLAGE DU MENU PRINCIPAL ---
-    return fyne.NewMainMenu(fileMenu, fakerMenu, patchMenu)
+    return fyne.NewMainMenu(fileMenu, fakerMenu, patchMenu, debugMenu)
 }

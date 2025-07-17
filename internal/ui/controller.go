@@ -22,9 +22,10 @@ type UIController struct {
     monitorIn       <-chan *UniverseMonitorData
     configRequester ConfigRequester
     isConfigLoaded  bool
+	onMonitorToggle func(bool)
 }
 
-func NewUIController(app fyne.App, faker *simulator.Faker, monitorIn <-chan *UniverseMonitorData, configRequester ConfigRequester) *UIController {
+func NewUIController(app fyne.App, faker *simulator.Faker, monitorIn <-chan *UniverseMonitorData, configRequester ConfigRequester, onMonitorToggle func(bool)) *UIController {
     c := &UIController{
         state:           NewUIState(nil), // Initialise avec une config vide
         onStateChange:   func() {},
@@ -33,6 +34,7 @@ func NewUIController(app fyne.App, faker *simulator.Faker, monitorIn <-chan *Uni
         monitorIn:       monitorIn,
         configRequester: configRequester,
         isConfigLoaded:  false,
+		onMonitorToggle: onMonitorToggle,
     }
     go c.listenForMonitorUpdates()
     return c
@@ -276,4 +278,10 @@ func amplifyColor(r, g, b byte) color.Color {
         b = minBrightness
     }
     return color.NRGBA{R: r, G: g, B: b, A: 255}
+}
+
+func (c *UIController) SetArtNetMonitoring(active bool) {
+    if c.onMonitorToggle != nil {
+        c.onMonitorToggle(active)
+    }
 }

@@ -1,25 +1,45 @@
 package main
 
 import (
-    "context"
-    "fyne.io/fyne/v2/app"
-    app_ehub "guitarHetic/internal/application/ehub"
-    app_processor "guitarHetic/internal/application/processor"
-    "guitarHetic/internal/config"
-    domain_artnet "guitarHetic/internal/domain/artnet"
-    "guitarHetic/internal/domain/ehub"
-    infra_artnet "guitarHetic/internal/infrastructure/artnet"
-    infra_ehub "guitarHetic/internal/infrastructure/ehub"
-    "guitarHetic/internal/simulator"
-    "guitarHetic/internal/ui"
-    "log"
-    "strconv"
-    "strings"
+	"context"
+	app_ehub "guitarHetic/internal/application/ehub"
+	app_processor "guitarHetic/internal/application/processor"
+	app_artnet_monitor "guitarHetic/internal/application/artnet_monitor"
+	infra_artnet_monitor "guitarHetic/internal/infrastructure/artnet_monitor"
+	"fyne.io/fyne/v2/app"
+	"guitarHetic/internal/config"
+	domain_artnet "guitarHetic/internal/domain/artnet"
+	"guitarHetic/internal/domain/ehub"
+	infra_artnet "guitarHetic/internal/infrastructure/artnet"
+	infra_ehub "guitarHetic/internal/infrastructure/ehub"
+	"guitarHetic/internal/simulator"
+	"guitarHetic/internal/ui"
+	"log"
+	"strconv"
+	"strings"
+	"sync"
 )
+
+var (
+    isArtNetMonitoringActive bool
+    monitoringMutex          sync.Mutex
+)
+
 
 func main() {
     log.Println("Démarrage du système...")
 
+ toggleCallback := func(active bool) {
+        monitoringMutex.Lock()
+        isArtNetMonitoringActive = active
+        monitoringMutex.Unlock()
+        if active {
+            log.Println("MAIN: Monitoring ArtNet ACTIVÉ.")
+        } else {
+            log.Println("MAIN: Monitoring ArtNet DÉSACTIVÉ.")
+        }
+    }
+	
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
@@ -37,7 +57,7 @@ func main() {
     w := a.NewWindow("Guitare Hetic - Inspecteur ArtNet")
     uiController := ui.NewUIController(a, faker, monitorChan, func(req ui.ConfigUpdateRequest) {
         configRequestChannel <- req
-    })
+    }, toggleCallback)
     ui.RunUI(uiController, w)
 
     go func() {
@@ -163,19 +183,21 @@ func main() {
 func startPipeline(ctx context.Context, cfg *config.Config, monitorChan chan *ui.UniverseMonitorData, eHubUpdateOut, fakerUpdateOut chan *ehub.EHubUpdateMsg, fakerConfigOut chan *ehub.EHubConfigMsg, fakerModeSwitch chan bool) *app_processor.Service {
     log.Println("Pipeline: Démarrage des services...")
 
+    // --- Canaux existants ---
     rawPacketChannel := make(chan ehub.RawPacket, 1000)
     eHubConfigOut := make(chan *ehub.EHubConfigMsg, 50)
     artnetQueue := make(chan domain_artnet.LEDMessage, 10000)
     finalConfigIn := make(chan *ehub.EHubConfigMsg, 50)
     finalUpdateIn := make(chan *ehub.EHubUpdateMsg, 1000)
 
+    // --- Pipeline eHub -> Processor -> ArtNet (existant) ---
     listener, _ := infra_ehub.NewListener(8765, rawPacketChannel)
     parser := app_ehub.NewParser()
     eHubService := app_ehub.NewService(rawPacketChannel, parser, eHubConfigOut, eHubUpdateOut)
     processorService, physicalConfigOut := app_processor.NewService(finalConfigIn, finalUpdateIn, artnetQueue, monitorChan)
     sender, _ := infra_artnet.NewSender()
 
-    go func() {
+   go func() {
         isFakerActive := false
         log.Println("Aiguilleur: Démarré en mode LIVE.")
         for {
@@ -216,8 +238,37 @@ func startPipeline(ctx context.Context, cfg *config.Config, monitorChan chan *ui
     eHubService.Start()
     processorService.Start()
     go sender.Run(ctx, artnetQueue)
-
     physicalConfigOut <- cfg
+
+    // --- NOUVEAU : PIPELINE DE MONITORING ARTNET ---
+    log.Println("Pipeline: Démarrage du moniteur ArtNet (E9)...")
+    artnetMonitorRawChan := make(chan infra_artnet_monitor.RawArtNetPacket, 100)
+    artnetMonitorParsedChan := make(chan *domain_artnet.ArtNetDMXPacket, 100)
+
+    artnetListener, err := infra_artnet_monitor.NewListener(6454, artnetMonitorRawChan)
+    if err != nil {
+        log.Printf("ERREUR: Impossible de démarrer le listener ArtNet: %v", err)
+    } else {
+        monitorService := app_artnet_monitor.NewService(artnetMonitorRawChan, artnetMonitorParsedChan)
+
+        artnetListener.Start(ctx)
+        monitorService.Start()
+
+        // Goroutine qui consomme les paquets parsés et les logue
+        go func() {
+            for packet := range artnetMonitorParsedChan {
+                monitoringMutex.Lock()
+                isActive := isArtNetMonitoringActive
+                monitoringMutex.Unlock()
+
+                if isActive {
+                    log.Println(packet.String())
+                }
+            }
+        }()
+    }
+    // --- FIN DU NOUVEAU BLOC ---
 
     return processorService
 }
+
