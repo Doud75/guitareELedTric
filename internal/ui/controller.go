@@ -13,16 +13,16 @@ import (
 )
 
 // ConfigUpdateRequest est la structure pour demander un changement de configuration.
-type ConfigRequester func(filePath string, ipChanges map[string]string)
+type ConfigRequester func(request ConfigUpdateRequest)
 
 type UIController struct {
-	state             *UIState
-	onStateChange     func()
-	app               fyne.App
-	faker             *simulator.Faker
-	monitorIn         <-chan *UniverseMonitorData
+	state           *UIState
+	onStateChange   func()
+	app             fyne.App
+	faker           *simulator.Faker
+	monitorIn       <-chan *UniverseMonitorData
 	configRequester ConfigRequester
-	isConfigLoaded    bool
+	isConfigLoaded  bool
 }
 
 // NewUIController est appelé par main.go
@@ -90,7 +90,7 @@ func (c *UIController) LoadNewConfigFile(uri fyne.URI) {
 		// --- FIN DE LA CORRECTION ---
 	}
 
-	c.configRequester(uri.Path(), nil) // On envoie toujours le chemin au backend.
+	c.configRequester(ConfigUpdateRequest{FilePath: uri.Path()})
 }
 // ValidateNewIP est appelée par le bouton "Sauvegarder" dans la vue de détail.
 func (c *UIController) ValidateNewIP(newIPStr string) {
@@ -103,7 +103,12 @@ func (c *UIController) ValidateNewIP(newIPStr string) {
 	log.Printf("UI Controller: Demande de changement d'IP de '%s' vers '%s'", oldIP, newIPStr)
 	ipChanges := make(map[string]string)
 	ipChanges[oldIP] = newIPStr
-	c.configRequester("", ipChanges) // On utilise le callback
+	c.configRequester(ConfigUpdateRequest{IPChanges: ipChanges})
+}
+
+func (c *UIController) SaveConfigFile(path string) {
+	log.Printf("UI Controller: Demande de sauvegarde vers: %s", path)
+	c.configRequester(ConfigUpdateRequest{ExportPath: path})
 }
 
 func (c *UIController) SetUpdateCallback(callback func()) {
