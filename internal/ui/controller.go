@@ -1,4 +1,3 @@
-// internal/ui/controller.go
 package ui
 
 import (
@@ -10,9 +9,9 @@ import (
 	"log"
 	"net"
 	"sort"
+	"fmt"
 )
 
-// ConfigUpdateRequest est la structure pour demander un changement de configuration.
 type ConfigRequester func(request ConfigUpdateRequest)
 
 type UIController struct {
@@ -25,7 +24,6 @@ type UIController struct {
 	isConfigLoaded  bool
 }
 
-// NewUIController est appelé par main.go
 func NewUIController(app fyne.App, faker *simulator.Faker, monitorIn <-chan *UniverseMonitorData, configRequester ConfigRequester) *UIController {
 	c := &UIController{
 		state:            NewUIState(nil), // Initialise avec une config vide
@@ -40,24 +38,16 @@ func NewUIController(app fyne.App, faker *simulator.Faker, monitorIn <-chan *Uni
 	return c
 }
 
-// NOUVELLE MÉTHODE
-// SetFaker permet de mettre à jour la référence du faker de manière thread-safe.
 func (c *UIController) SetFaker(newFaker *simulator.Faker) {
-	// On pourrait ajouter un mutex ici si nécessaire, mais pour une simple
-	// assignation de pointeur, ce n'est généralement pas un problème.
 	c.faker = newFaker
 }
 
 
-// IsConfigLoaded permet à l'UI de savoir si elle doit afficher l'écran d'accueil ou la liste d'IP.
 func (c *UIController) IsConfigLoaded() bool {
 	return c.isConfigLoaded
 }
 
-// UpdateWithNewConfig est appelée par le Gestionnaire de Configuration pour rafraîchir l'UI.
 func (c *UIController) UpdateWithNewConfig(cfg *config.Config) {
-	// CORRECTION 1: Remplacement de Invoke par fyne.Do
-	// fyne.Do est la nouvelle manière, plus simple, d'exécuter du code sur le thread de l'UI.
 	fyne.Do(func() {
 		if cfg == nil {
 			c.isConfigLoaded = false
@@ -74,20 +64,15 @@ func (c *UIController) UpdateWithNewConfig(cfg *config.Config) {
 	})
 }
 
-// LoadNewConfigFile est appelée depuis le menu de l'UI.
 func (c *UIController) LoadNewConfigFile(uri fyne.URI) {
 	log.Printf("UI Controller: Demande de chargement du fichier: %s", uri.Path())
 
-	// On stocke le répertoire parent de l'URI sélectionné.
 	parent, err := storage.Parent(uri)
 	if err == nil {
-		// --- CORRECTION ---
-		// On fait une "type assertion" pour convertir le fyne.URI en fyne.ListableURI.
-		// On vérifie aussi que la conversion a réussi avec la variable 'ok'.
 		if listableParent, ok := parent.(fyne.ListableURI); ok {
 			c.state.lastOpenedFolder = listableParent
 		}
-		// --- FIN DE LA CORRECTION ---
+	
 	}
 
 	c.configRequester(ConfigUpdateRequest{FilePath: uri.Path()})
@@ -104,6 +89,22 @@ func (c *UIController) ValidateNewIP(newIPStr string) {
 	ipChanges := make(map[string]string)
 	ipChanges[oldIP] = newIPStr
 	c.configRequester(ConfigUpdateRequest{IPChanges: ipChanges})
+}
+
+func (c *UIController) ValidateNewIPForUniverse(universeID int, newIPStr string) {
+    if net.ParseIP(newIPStr) == nil {
+		log.Printf("UI ERROR: L'adresse IP '%s' pour l'univers %d est invalide. Abandon.", newIPStr, universeID)
+		return
+	}
+
+    log.Printf("UI Controller: Demande de changement d'IP pour l'univers %d vers '%s'", universeID, newIPStr)
+    
+    ipChanges := make(map[string]string)
+    
+    universeKey := fmt.Sprintf("universe:%d", universeID)
+    ipChanges[universeKey] = newIPStr
+
+    c.configRequester(ConfigUpdateRequest{IPChanges: ipChanges})
 }
 
 func (c *UIController) SaveConfigFile(path string) {
@@ -141,8 +142,6 @@ func (c *UIController) GoBack() {
 
 func (c *UIController) SelectUniverseAndShowDetails(universeID int) {
 	entityCount := 0
-	// CORRECTION 2: On ne peut plus utiliser c.currentConfig.
-	// On doit se baser sur les données déjà dans l'état de l'UI.
 	for _, ipData := range c.state.allControllers {
 		if ranges, ok := ipData[universeID]; ok {
 			for _, r := range ranges {

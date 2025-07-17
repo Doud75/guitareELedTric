@@ -4,7 +4,8 @@ package main
 import (
 	"context"
 	"log"
-
+	"strconv"
+	"strings"
 	"fyne.io/fyne/v2/app"
 	app_ehub "guitarHetic/internal/application/ehub"
 	app_processor "guitarHetic/internal/application/processor"
@@ -71,15 +72,39 @@ func main() {
 
 				if req.IPChanges != nil && currentConfig != nil {
 					log.Printf("Gestionnaire de Config: Application des changements d'IP: %v", req.IPChanges)
-					for oldIP, newIP := range req.IPChanges {
-						for i, entry := range currentConfig.RoutingTable {
-							if entry.IP == oldIP {
-								currentConfig.RoutingTable[i].IP = newIP
+
+					for key, newIP := range req.IPChanges {
+						// On vérifie si la clé est pour un univers spécifique
+						if strings.HasPrefix(key, "universe:") {
+							universeIDStr := strings.TrimPrefix(key, "universe:")
+							universeID, err := strconv.Atoi(universeIDStr)
+							if err != nil {
+								log.Printf("ERREUR: Clé d'univers invalide: %s", key)
+								continue
 							}
-						}
-						for u, ip := range currentConfig.UniverseIP {
-							if ip == oldIP {
-								currentConfig.UniverseIP[u] = newIP
+
+							log.Printf("  -> Changement spécifique pour l'univers %d vers l'IP %s", universeID, newIP)
+							if _, ok := currentConfig.UniverseIP[universeID]; ok {
+								currentConfig.UniverseIP[universeID] = newIP
+							}
+							for i, entry := range currentConfig.RoutingTable {
+								if entry.Universe == universeID {
+									currentConfig.RoutingTable[i].IP = newIP
+								}
+							}
+
+						} else {
+							oldIP := key
+							log.Printf("  -> Changement global de l'IP %s vers %s", oldIP, newIP)
+							for i, entry := range currentConfig.RoutingTable {
+								if entry.IP == oldIP {
+									currentConfig.RoutingTable[i].IP = newIP
+								}
+							}
+							for u, ip := range currentConfig.UniverseIP {
+								if ip == oldIP {
+									currentConfig.UniverseIP[u] = newIP
+								}
 							}
 						}
 					}
