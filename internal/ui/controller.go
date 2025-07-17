@@ -1,36 +1,196 @@
+// internal/ui/controller.go
 package ui
 
 import (
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/storage" 
 	"guitarHetic/internal/config"
 	"guitarHetic/internal/simulator"
 	"image/color"
+	"log"
 	"net"
 	"sort"
 )
 
+// ConfigUpdateRequest est la structure pour demander un changement de configuration.
+type ConfigRequester func(filePath string, ipChanges map[string]string)
+
 type UIController struct {
 	state             *UIState
 	onStateChange     func()
-	currentConfig     *config.Config
-	physicalConfigOut chan<- *config.Config
 	app               fyne.App
 	faker             *simulator.Faker
 	monitorIn         <-chan *UniverseMonitorData
+	configRequester ConfigRequester
+	isConfigLoaded    bool
 }
 
-func NewUIController(state *UIState, initialConfig *config.Config, cfgOut chan<- *config.Config, app fyne.App, faker *simulator.Faker, monitorIn <-chan *UniverseMonitorData) *UIController {
+// NewUIController est appelé par main.go
+func NewUIController(app fyne.App, faker *simulator.Faker, monitorIn <-chan *UniverseMonitorData, configRequester ConfigRequester) *UIController {
 	c := &UIController{
-		state:             state,
-		onStateChange:     func() {},
-		currentConfig:     initialConfig,
-		physicalConfigOut: cfgOut,
-		app:               app,
-		faker:             faker,
-		monitorIn:         monitorIn,
+		state:            NewUIState(nil), // Initialise avec une config vide
+		onStateChange:    func() {},
+		app:              app,
+		faker:            faker,
+		monitorIn:        monitorIn,
+		configRequester: configRequester,
+		isConfigLoaded:   false,
 	}
 	go c.listenForMonitorUpdates()
 	return c
+}
+
+// NOUVELLE MÉTHODE
+// SetFaker permet de mettre à jour la référence du faker de manière thread-safe.
+func (c *UIController) SetFaker(newFaker *simulator.Faker) {
+	// On pourrait ajouter un mutex ici si nécessaire, mais pour une simple
+	// assignation de pointeur, ce n'est généralement pas un problème.
+	c.faker = newFaker
+}
+
+
+// IsConfigLoaded permet à l'UI de savoir si elle doit afficher l'écran d'accueil ou la liste d'IP.
+func (c *UIController) IsConfigLoaded() bool {
+	return c.isConfigLoaded
+}
+
+// UpdateWithNewConfig est appelée par le Gestionnaire de Configuration pour rafraîchir l'UI.
+func (c *UIController) UpdateWithNewConfig(cfg *config.Config) {
+	// CORRECTION 1: Remplacement de Invoke par fyne.Do
+	// fyne.Do est la nouvelle manière, plus simple, d'exécuter du code sur le thread de l'UI.
+	fyne.Do(func() {
+		if cfg == nil {
+			c.isConfigLoaded = false
+			c.state = NewUIState(nil) // Reset state
+		} else {
+			newIPs, newCtrlMap := BuildModel(cfg)
+			c.state.allControllers = newCtrlMap
+			c.state.controllerIPs = newIPs
+			c.state.viewStack = make([]ViewName, 0)
+			c.state.CurrentView = IPListView
+			c.isConfigLoaded = true
+		}
+		c.onStateChange() // Demande un rafraîchissement de l'UI
+	})
+}
+
+// LoadNewConfigFile est appelée depuis le menu de l'UI.
+func (c *UIController) LoadNewConfigFile(uri fyne.URI) {
+	log.Printf("UI Controller: Demande de chargement du fichier: %s", uri.Path())
+
+	// On stocke le répertoire parent de l'URI sélectionné.
+	parent, err := storage.Parent(uri)
+	if err == nil {
+		// --- CORRECTION ---
+		// On fait une "type assertion" pour convertir le fyne.URI en fyne.ListableURI.
+		// On vérifie aussi que la conversion a réussi avec la variable 'ok'.
+		if listableParent, ok := parent.(fyne.ListableURI); ok {
+			c.state.lastOpenedFolder = listableParent
+		}
+		// --- FIN DE LA CORRECTION ---
+	}
+
+	c.configRequester(uri.Path(), nil) // On envoie toujours le chemin au backend.
+}
+// ValidateNewIP est appelée par le bouton "Sauvegarder" dans la vue de détail.
+func (c *UIController) ValidateNewIP(newIPStr string) {
+	if net.ParseIP(newIPStr) == nil {
+		log.Printf("UI ERROR: L'adresse IP '%s' est invalide. Abandon.", newIPStr)
+		return
+	}
+	oldIP := c.state.selectedIP
+	if oldIP == newIPStr { return }
+	log.Printf("UI Controller: Demande de changement d'IP de '%s' vers '%s'", oldIP, newIPStr)
+	ipChanges := make(map[string]string)
+	ipChanges[oldIP] = newIPStr
+	c.configRequester("", ipChanges) // On utilise le callback
+}
+
+func (c *UIController) SetUpdateCallback(callback func()) {
+	c.onStateChange = callback
+}
+
+func (c *UIController) navigateTo(view ViewName) {
+	c.state.viewStack = append(c.state.viewStack, c.state.CurrentView)
+	c.state.CurrentView = view
+	c.onStateChange()
+}
+
+func (c *UIController) GoBack() {
+	stackLen := len(c.state.viewStack)
+	if stackLen == 0 {
+		return
+	}
+	previousView := c.state.viewStack[stackLen-1]
+	c.state.viewStack = c.state.viewStack[:stackLen-1]
+	if c.state.CurrentView == UniverseView {
+		c.state.ledStateMutex.Lock()
+		c.state.universeViewContent = nil
+		c.state.ledInputWidgets = nil
+		c.state.ledOutputWidgets = nil
+		c.state.ledStateMutex.Unlock()
+	}
+	c.state.CurrentView = previousView
+	c.onStateChange()
+}
+
+func (c *UIController) SelectUniverseAndShowDetails(universeID int) {
+	entityCount := 0
+	// CORRECTION 2: On ne peut plus utiliser c.currentConfig.
+	// On doit se baser sur les données déjà dans l'état de l'UI.
+	for _, ipData := range c.state.allControllers {
+		if ranges, ok := ipData[universeID]; ok {
+			for _, r := range ranges {
+				entityCount += (r[1] - r[0] + 1)
+			}
+		}
+	}
+
+	if entityCount == 0 {
+		log.Printf("UI CONTROLLER: Aucune entité trouvée pour l'univers %d. Affichage annulé.", universeID)
+		return
+	}
+	log.Printf("UI CONTROLLER: Construction de la vue pour l'univers %d avec %d entités.", universeID, entityCount)
+	c.state.selectedUniverse = universeID
+	c.state.universeViewContent = buildUniverseView(c.state, entityCount)
+	c.navigateTo(UniverseView)
+}
+
+func (c *UIController) SelectIPAndShowDetails(ip string) {
+	c.state.selectedIP = ip
+	entries := c.state.allControllers[ip]
+	details := make([]UniRange, 0, len(entries))
+	for u, ranges := range entries {
+		details = append(details, UniRange{Universe: u, Ranges: ranges})
+	}
+	sort.Slice(details, func(i, j int) bool { return details[i].Universe < details[j].Universe })
+	c.state.selectedDetails = details
+	c.navigateTo(DetailView)
+}
+
+func (c *UIController) QuitApp() {
+	if c.faker != nil {
+		c.faker.Stop()
+	}
+	c.app.Quit()
+}
+
+func (c *UIController) RunFakerCommand(command string) {
+	if c.faker != nil {
+		go c.faker.SendTestPattern(command)
+	}
+}
+
+func (c *UIController) RunFakerCustomColor(r, g, b, w byte) {
+	if c.faker != nil {
+		go c.faker.SendTestPattern("custom", r, g, b, w)
+	}
+}
+
+func (c *UIController) SwitchToLiveMode() {
+	if c.faker != nil {
+		go c.faker.SwitchToLiveMode()
+	}
 }
 
 func (c *UIController) listenForMonitorUpdates() {
@@ -71,127 +231,6 @@ func (c *UIController) listenForMonitorUpdates() {
 			}
 		})
 	}
-}
-
-func (c *UIController) SetUpdateCallback(callback func()) {
-	c.onStateChange = callback
-}
-
-func (c *UIController) navigateTo(view ViewName) {
-	c.state.viewStack = append(c.state.viewStack, c.state.CurrentView)
-	c.state.CurrentView = view
-	c.onStateChange()
-}
-
-func (c *UIController) GoBack() {
-	stackLen := len(c.state.viewStack)
-	if stackLen == 0 {
-		return
-	}
-	previousView := c.state.viewStack[stackLen-1]
-	c.state.viewStack = c.state.viewStack[:stackLen-1]
-	if c.state.CurrentView == UniverseView {
-		c.state.ledStateMutex.Lock()
-		c.state.universeViewContent = nil
-		c.state.ledInputWidgets = nil
-		c.state.ledOutputWidgets = nil
-		c.state.ledStateMutex.Unlock()
-	}
-	c.state.CurrentView = previousView
-	c.onStateChange()
-}
-
-func (c *UIController) SelectUniverseAndShowDetails(universeID int) {
-	entityCount := 0
-	for _, route := range c.currentConfig.RoutingTable {
-		if route.Universe == universeID {
-			entityCount++
-		}
-	}
-	if entityCount == 0 {
-		return
-	}
-	c.state.selectedUniverse = universeID
-	c.state.universeViewContent = buildUniverseView(c.state, entityCount)
-	c.navigateTo(UniverseView)
-}
-
-func (c *UIController) SelectIPAndShowDetails(ip string) {
-	c.state.selectedIP = ip
-	entries := c.state.allControllers[ip]
-	details := make([]UniRange, 0, len(entries))
-	for u, ranges := range entries {
-		details = append(details, UniRange{Universe: u, Ranges: ranges})
-	}
-	sort.Slice(details, func(i, j int) bool { return details[i].Universe < details[j].Universe })
-	c.state.selectedDetails = details
-	c.navigateTo(DetailView)
-}
-
-func (c *UIController) QuitApp() {
-	if c.faker != nil {
-		c.faker.Stop() // Appelle la nouvelle méthode Stop du Faker
-	}
-	c.app.Quit()
-}
-
-// Pour les commandes simples comme "red", "animation", etc.
-func (c *UIController) RunFakerCommand(command string) {
-	if c.faker != nil {
-		go c.faker.SendTestPattern(command)
-	}
-}
-
-// Pour la couleur personnalisée venant de la boîte de dialogue
-func (c *UIController) RunFakerCustomColor(r, g, b, w byte) {
-	if c.faker != nil {
-		go c.faker.SendTestPattern("custom", r, g, b, w)
-	}
-}
-
-func (c *UIController) ValidateNewIP(newIP string) {
-	if net.ParseIP(newIP) == nil {
-		return
-	}
-	oldIP := c.state.selectedIP
-	newConfig := deepCopyConfig(c.currentConfig)
-	for i, entry := range newConfig.RoutingTable {
-		if entry.IP == oldIP {
-			newConfig.RoutingTable[i].IP = newIP
-		}
-	}
-	for i, ip := range newConfig.UniverseIP {
-		if ip == oldIP {
-			newConfig.UniverseIP[i] = newIP
-		}
-	}
-	c.physicalConfigOut <- newConfig
-	c.currentConfig = newConfig
-	newIPs, newCtrlMap := BuildModel(newConfig)
-	c.state.allControllers = newCtrlMap
-	c.state.controllerIPs = newIPs
-	c.state.viewStack = make([]ViewName, 0)
-	c.state.CurrentView = IPListView
-	c.onStateChange()
-}
-
-func (c *UIController) SwitchToLiveMode() {
-	if c.faker != nil {
-		go c.faker.SwitchToLiveMode()
-	}
-}
-
-func deepCopyConfig(original *config.Config) *config.Config {
-	if original == nil {
-		return nil
-	}
-	newRoutingTable := make([]config.RoutingEntry, len(original.RoutingTable))
-	copy(newRoutingTable, original.RoutingTable)
-	newUniverseIP := make(map[int]string)
-	for k, v := range original.UniverseIP {
-		newUniverseIP[k] = v
-	}
-	return &config.Config{RoutingTable: newRoutingTable, UniverseIP: newUniverseIP}
 }
 
 func amplifyColor(r, g, b byte) color.Color {

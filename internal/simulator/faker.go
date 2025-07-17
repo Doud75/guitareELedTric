@@ -28,11 +28,20 @@ type Faker struct {
 // NewFaker constructeur simple.
 func NewFaker(updateOut chan<- *ehub.EHubUpdateMsg, configOut chan<- *ehub.EHubConfigMsg, modeSwitch chan<- bool, cfg *config.Config) *Faker {
 	var entityIDs []uint16
-	for _, entry := range cfg.RoutingTable {
-		entityIDs = append(entityIDs, uint16(entry.EntityID))
+	
+	// --- CORRECTION ---
+	// On vérifie si la configuration n'est pas nulle avant d'essayer de l'utiliser.
+	if cfg != nil {
+		for _, entry := range cfg.RoutingTable {
+			entityIDs = append(entityIDs, uint16(entry.EntityID))
+		}
+		slices.Sort(entityIDs)
+		log.Printf("Faker: Initialisé avec %d entités.", len(entityIDs))
+	} else {
+		log.Println("Faker: Initialisé sans configuration (en attente de chargement).")
 	}
-	slices.Sort(entityIDs)
-	log.Printf("Faker: Initialisé avec %d entités.", len(entityIDs))
+	// --- FIN DE LA CORRECTION ---
+	
 	return &Faker{
 		updateOut:    updateOut,
 		configOut:    configOut,
@@ -41,6 +50,7 @@ func NewFaker(updateOut chan<- *ehub.EHubUpdateMsg, configOut chan<- *ehub.EHubC
 		allEntityIDs: entityIDs,
 	}
 }
+
 
 // sendStaticPattern gère l'envoi "atomique" des motifs non animés.
 func (f *Faker) sendStaticPattern(entities []ehub.EHubEntityState) {

@@ -140,7 +140,6 @@ func (s *Service) processUpdate(updateMsg *ehub.EHubUpdateMsg) {
             }
 
             // 3. On crée le message de monitoring avec la liste FILTRÉE.
-            log.Printf("MONITOR_SEND: Envoi des données pour l'univers %d (%d entités pertinentes) vers l'UI.", universe, len(relevantEntities))
             monitorData := &ui.UniverseMonitorData{
                 UniverseID: universe,
                 InputState: relevantEntities, // On utilise la petite liste filtrée !
