@@ -9,7 +9,7 @@ import (
 )
 
 const dmxDataSize = 512
-const tickDuration = 33 * time.Millisecond // 30 FPS la
+const tickDuration = 33 * time.Millisecond
 
 type Sender struct {
     conns          map[int]*net.UDPConn
