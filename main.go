@@ -169,7 +169,11 @@ func startPipeline(ctx context.Context, cfg *config.Config, monitorChan chan *ui
     finalConfigIn := make(chan *ehub.EHubConfigMsg, 50)
     finalUpdateIn := make(chan *ehub.EHubUpdateMsg, 1000)
 
-    listener, _ := infra_ehub.NewListener(8765, rawPacketChannel)
+    listener, err := infra_ehub.NewListener(8765, rawPacketChannel)
+    if err != nil {
+        log.Printf("ERREUR CRITIQUE: Impossible de créer le listener eHub: %v", err)
+        return nil
+    }
     parser := app_ehub.NewParser()
     eHubService := app_ehub.NewService(rawPacketChannel, parser, eHubConfigOut, eHubUpdateOut)
     processorService, physicalConfigOut := app_processor.NewService(finalConfigIn, finalUpdateIn, artnetQueue, monitorChan)
@@ -177,6 +181,7 @@ func startPipeline(ctx context.Context, cfg *config.Config, monitorChan chan *ui
     sender, err := infra_artnet.NewSender(cfg.UniverseIP)
     if err != nil {
         log.Printf("ERREUR: Impossible d'initialiser le sender ArtNet: %v", err)
+        listener.Start(ctx)
         return nil
     }
 
