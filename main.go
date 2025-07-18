@@ -15,6 +15,21 @@ import (
     "log"
     "strconv"
     "strings"
+	"context"
+	app_ehub "guitarHetic/internal/application/ehub"
+	app_processor "guitarHetic/internal/application/processor"
+	"guitarHetic/internal/config"
+	domain_artnet "guitarHetic/internal/domain/artnet"
+	"guitarHetic/internal/domain/ehub"
+	infra_artnet "guitarHetic/internal/infrastructure/artnet"
+	infra_ehub "guitarHetic/internal/infrastructure/ehub"
+	"guitarHetic/internal/simulator"
+	"guitarHetic/internal/ui"
+	"log"
+	"strconv"
+	"strings"
+
+	"fyne.io/fyne/v2/app"
 )
 
 func main() {
@@ -169,11 +184,19 @@ func startPipeline(ctx context.Context, cfg *config.Config, monitorChan chan *ui
     finalConfigIn := make(chan *ehub.EHubConfigMsg, 50)
     finalUpdateIn := make(chan *ehub.EHubUpdateMsg, 1000)
 
-    listener, _ := infra_ehub.NewListener(8765, rawPacketChannel)
-    parser := app_ehub.NewParser()
-    eHubService := app_ehub.NewService(rawPacketChannel, parser, eHubConfigOut, eHubUpdateOut)
-    processorService, physicalConfigOut := app_processor.NewService(finalConfigIn, finalUpdateIn, artnetQueue, monitorChan)
-    sender, _ := infra_artnet.NewSender()
+	// Création des services
+listener, _ := infra_ehub.NewListener(8765, rawPacketChannel)
+parser := app_ehub.NewParser()
+eHubService := app_ehub.NewService(rawPacketChannel, parser, eHubConfigOut, eHubUpdateOut)
+// LE PROCESSOR UTILISE LE CANAL DE MONITORING PASSÉ EN ARGUMENT
+processorService, physicalConfigOut := app_processor.NewService(finalConfigIn, finalUpdateIn, artnetQueue, monitorChan)
+
+// Initialisation correcte du sender avec la map UniverseIP
+sender, err := infra_artnet.NewSender(cfg.UniverseIP)
+if err != nil {
+	log.Printf("ERREUR: Impossible d'initialiser le sender ArtNet: %v", err)
+	return
+}
 
     go func() {
         isFakerActive := false
