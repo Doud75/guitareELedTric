@@ -15,21 +15,6 @@ import (
     "log"
     "strconv"
     "strings"
-	"context"
-	app_ehub "guitarHetic/internal/application/ehub"
-	app_processor "guitarHetic/internal/application/processor"
-	"guitarHetic/internal/config"
-	domain_artnet "guitarHetic/internal/domain/artnet"
-	"guitarHetic/internal/domain/ehub"
-	infra_artnet "guitarHetic/internal/infrastructure/artnet"
-	infra_ehub "guitarHetic/internal/infrastructure/ehub"
-	"guitarHetic/internal/simulator"
-	"guitarHetic/internal/ui"
-	"log"
-	"strconv"
-	"strings"
-
-	"fyne.io/fyne/v2/app"
 )
 
 func main() {
@@ -194,8 +179,8 @@ processorService, physicalConfigOut := app_processor.NewService(finalConfigIn, f
 // Initialisation correcte du sender avec la map UniverseIP
 sender, err := infra_artnet.NewSender(cfg.UniverseIP)
 if err != nil {
-	log.Printf("ERREUR: Impossible d'initialiser le sender ArtNet: %v", err)
-	return
+    log.Printf("ERREUR: Impossible d'initialiser le sender ArtNet: %v", err)
+    return nil
 }
 
     go func() {
