@@ -1,4 +1,3 @@
-// internal/ui/app.go
 package ui
 
 import (
@@ -14,8 +13,8 @@ import (
 )
 
 func RunUI(
-    controller *UIController, // On reçoit directement le contrôleur pré-configuré
-    w fyne.Window,            // On reçoit la fenêtre de l'extérieur
+    controller *UIController,
+    w fyne.Window,
 ) {
     mainMenu := buildMainMenu(controller, w)
     w.SetMainMenu(mainMenu)
@@ -51,11 +50,9 @@ func RunUI(
     w.Resize(fyne.NewSize(1324, 768))
 }
 
-// MODIFICATION: Version la plus sûre de buildMainMenu
 func buildMainMenu(controller *UIController, parentWindow fyne.Window) *fyne.MainMenu {
     xlsxFilter := storage.NewExtensionFileFilter([]string{".xlsx"})
 
-    // --- Menu "Art'hetic" (inchangé) ---
     fileMenu := fyne.NewMenu("Art'hetic",
         fyne.NewMenuItem("Charger configuration...", func() {
             fileDialog := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
@@ -88,7 +85,6 @@ func buildMainMenu(controller *UIController, parentWindow fyne.Window) *fyne.Mai
         }),
     )
 
-    // --- Menu "Faker" (inchangé) ---
     showColorPicker := func() {
         r, g, b, w := binding.NewFloat(), binding.NewFloat(), binding.NewFloat(), binding.NewFloat()
         preview := canvas.NewRectangle(color.Black)
@@ -143,8 +139,7 @@ func buildMainMenu(controller *UIController, parentWindow fyne.Window) *fyne.Mai
         fyne.NewMenuItem("Retour au mode LIVE (eHub)", func() { controller.SwitchToLiveMode() }),
     )
 
-    // --- Menu "Patching" (Version ultra-simple et stable) ---
-    var isPatchingActive = false // Variable locale pour garder une trace de l'état
+    var isPatchingActive = false
 
     patchMenu := fyne.NewMenu("Patching",
         fyne.NewMenuItem("Charger un fichier de Patch (.xlsx)...", func() {
@@ -163,7 +158,6 @@ func buildMainMenu(controller *UIController, parentWindow fyne.Window) *fyne.Mai
         }),
         fyne.NewMenuItemSeparator(),
         fyne.NewMenuItem("Activer/Désactiver le Patching", func() {
-            // On bascule l'état et on informe le contrôleur
             isPatchingActive = !isPatchingActive
             controller.SetPatchingActive(isPatchingActive)
             if isPatchingActive {
@@ -174,6 +168,5 @@ func buildMainMenu(controller *UIController, parentWindow fyne.Window) *fyne.Mai
         }),
     )
 
-    // --- ASSEMBLAGE DU MENU PRINCIPAL ---
     return fyne.NewMainMenu(fileMenu, fakerMenu, patchMenu)
 }

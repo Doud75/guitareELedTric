@@ -1,27 +1,24 @@
-// internal/ui/views.go
 package ui
 
 import (
-	"fmt"
-	"image/color"
-	"strings"
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
-	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/layout"
-	"fyne.io/fyne/v2/theme"
-	"fyne.io/fyne/v2/widget"
+    "fmt"
+    "fyne.io/fyne/v2"
+    "fyne.io/fyne/v2/canvas"
+    "fyne.io/fyne/v2/container"
+    "fyne.io/fyne/v2/dialog"
+    "fyne.io/fyne/v2/layout"
+    "fyne.io/fyne/v2/theme"
+    "fyne.io/fyne/v2/widget"
+    "image/color"
+    "strings"
 )
 
-// --- VUE DE MONITORING (AVEC SÉPARATEUR FIXE ET ESPACEMENT) ---
 func buildUniverseView(state *UIState, ledCount int) fyne.CanvasObject {
     state.ledStateMutex.Lock()
     defer state.ledStateMutex.Unlock()
 
     ledWidgetSize := fyne.NewSize(14, 14)
 
-    // --- Panneau de Gauche (Entrée eHub) ---
     inputLedObjects := make([]fyne.CanvasObject, ledCount)
     state.ledInputWidgets = make([]*LedWidget, 0, ledCount)
     for i := 0; i < ledCount; i++ {
@@ -37,7 +34,6 @@ func buildUniverseView(state *UIState, ledCount int) fyne.CanvasObject {
         inputScroll,
     )
 
-    // --- Panneau de Droite (Sortie Art-Net) ---
     outputLedObjects := make([]fyne.CanvasObject, ledCount)
     state.ledOutputWidgets = make([]*LedWidget, 0, ledCount)
     for i := 0; i < ledCount; i++ {
@@ -53,7 +49,6 @@ func buildUniverseView(state *UIState, ledCount int) fyne.CanvasObject {
         outputScroll,
     )
 
-    // --- Assemblage final ---
     leftSideWithSeparator := container.NewBorder(nil, nil, nil, widget.NewSeparator(), inputColumn)
     return container.NewPadded(
         container.New(layout.NewGridLayout(2),
@@ -62,8 +57,6 @@ func buildUniverseView(state *UIState, ledCount int) fyne.CanvasObject {
         ),
     )
 }
-
-// --- WIDGETS PERSONNALISÉS ET AUTRES VUES ---
 
 type LedWidget struct {
     widget.BaseWidget
@@ -110,9 +103,7 @@ func buildHeader(state *UIState, controller *UIController) fyne.CanvasObject {
     title := widget.NewLabel("Inspecteur Art'Hetic")
     title.TextStyle.Bold = true
     var headerContent fyne.CanvasObject
-    // La condition d'affichage du bouton reste la même.
     if state.CurrentView == DetailView || state.CurrentView == UniverseView {
-        // Le bouton appelle maintenant la nouvelle fonction intelligente GoBack().
         backButton := widget.NewButtonWithIcon("Retour", theme.NavigateBackIcon(), func() {
             controller.GoBack()
         })
@@ -141,72 +132,70 @@ func buildIPListView(state *UIState, controller *UIController) fyne.CanvasObject
 }
 
 func buildDetailView(state *UIState, controller *UIController) fyne.CanvasObject {
-	ipInputGlobal := NewSizedEntry(200.0)
-	ipInputGlobal.SetText(state.selectedIP)
-	validateButtonGlobal := widget.NewButtonWithIcon("Sauvegarder Tout", theme.ConfirmIcon(), func() { 
-        controller.ValidateNewIP(ipInputGlobal.Text) 
+    ipInputGlobal := NewSizedEntry(200.0)
+    ipInputGlobal.SetText(state.selectedIP)
+    validateButtonGlobal := widget.NewButtonWithIcon("Sauvegarder Tout", theme.ConfirmIcon(), func() {
+        controller.ValidateNewIP(ipInputGlobal.Text)
     })
-	validateButtonGlobal.Importance = widget.HighImportance
-	editLineGlobal := container.NewHBox(widget.NewLabel("Nouvelle IP pour tout le contrôleur :"), ipInputGlobal, validateButtonGlobal, layout.NewSpacer())
+    validateButtonGlobal.Importance = widget.HighImportance
+    editLineGlobal := container.NewHBox(widget.NewLabel("Nouvelle IP pour tout le contrôleur :"), ipInputGlobal, validateButtonGlobal, layout.NewSpacer())
 
-	universeItems := []fyne.CanvasObject{
-		widget.NewLabelWithStyle("Univers & Plages d'Entités", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-	}
-	for _, detail := range state.selectedDetails {
-		currentDetail := detail
+    universeItems := []fyne.CanvasObject{
+        widget.NewLabelWithStyle("Univers & Plages d'Entités", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+    }
+    for _, detail := range state.selectedDetails {
+        currentDetail := detail
 
-		
-		parts := make([]string, len(currentDetail.Ranges))
-		for i, rg := range currentDetail.Ranges {
-			parts[i] = fmt.Sprintf("%d à %d", rg[0], rg[1])
-		}
-		labelRanges := widget.NewLabel(fmt.Sprintf("Univers %d (%s)", currentDetail.Universe, strings.Join(parts, ", ")))
+        parts := make([]string, len(currentDetail.Ranges))
+        for i, rg := range currentDetail.Ranges {
+            parts[i] = fmt.Sprintf("%d à %d", rg[0], rg[1])
+        }
+        labelRanges := widget.NewLabel(fmt.Sprintf("Univers %d (%s)", currentDetail.Universe, strings.Join(parts, ", ")))
 
         monitorButton := widget.NewButton("Monitorer", func() {
-			controller.SelectUniverseAndShowDetails(currentDetail.Universe)
-		})
+            controller.SelectUniverseAndShowDetails(currentDetail.Universe)
+        })
 
-		var ipDialog dialog.Dialog
-		ipInput := NewSizedEntry(200.0)
+        var ipDialog dialog.Dialog
+        ipInput := NewSizedEntry(200.0)
 
-		dialogContent := container.NewVBox(
-			widget.NewLabel(fmt.Sprintf("Entrez la nouvelle IP pour l'univers %d", currentDetail.Universe)),
-			ipInput,
-		)
+        dialogContent := container.NewVBox(
+            widget.NewLabel(fmt.Sprintf("Entrez la nouvelle IP pour l'univers %d", currentDetail.Universe)),
+            ipInput,
+        )
 
-		ipDialog = dialog.NewCustomConfirm(
-			"Modifier l'IP de l'univers", 
-			"Sauvegarder",               
-			"Annuler",                    
-			dialogContent,
-			func(confirm bool) {
-				if !confirm {
-					return
-				}
-				controller.ValidateNewIPForUniverse(currentDetail.Universe, ipInput.Text)
-			},
-			fyne.CurrentApp().Driver().AllWindows()[0], // La fenêtre parente
-		)
+        ipDialog = dialog.NewCustomConfirm(
+            "Modifier l'IP de l'univers",
+            "Sauvegarder",
+            "Annuler",
+            dialogContent,
+            func(confirm bool) {
+                if !confirm {
+                    return
+                }
+                controller.ValidateNewIPForUniverse(currentDetail.Universe, ipInput.Text)
+            },
+            fyne.CurrentApp().Driver().AllWindows()[0],
+        )
 
-		editIPButton := widget.NewButtonWithIcon("", theme.SettingsIcon(), func() {
-			ipInput.SetText(controller.state.selectedIP)
-			ipDialog.Show()
-		})
+        editIPButton := widget.NewButtonWithIcon("", theme.SettingsIcon(), func() {
+            ipInput.SetText(controller.state.selectedIP)
+            ipDialog.Show()
+        })
 
+        row := container.NewBorder(
+            nil, nil,
+            labelRanges,
+            container.NewHBox(editIPButton, monitorButton),
+        )
 
-		row := container.NewBorder(
-			nil, nil, 
-			labelRanges, 
-			container.NewHBox(editIPButton, monitorButton), 
-		)
+        universeItems = append(universeItems, row)
+    }
+    universeList := container.NewVBox(universeItems...)
 
-		universeItems = append(universeItems, row)
-	}
-	universeList := container.NewVBox(universeItems...)
-
-	return container.NewScroll(container.NewVBox(
-        container.NewPadded(editLineGlobal), 
-        widget.NewSeparator(), 
+    return container.NewScroll(container.NewVBox(
+        container.NewPadded(editLineGlobal),
+        widget.NewSeparator(),
         container.NewPadded(universeList),
     ))
 }

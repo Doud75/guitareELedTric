@@ -169,19 +169,16 @@ func startPipeline(ctx context.Context, cfg *config.Config, monitorChan chan *ui
     finalConfigIn := make(chan *ehub.EHubConfigMsg, 50)
     finalUpdateIn := make(chan *ehub.EHubUpdateMsg, 1000)
 
-	// Création des services
-listener, _ := infra_ehub.NewListener(8765, rawPacketChannel)
-parser := app_ehub.NewParser()
-eHubService := app_ehub.NewService(rawPacketChannel, parser, eHubConfigOut, eHubUpdateOut)
-// LE PROCESSOR UTILISE LE CANAL DE MONITORING PASSÉ EN ARGUMENT
-processorService, physicalConfigOut := app_processor.NewService(finalConfigIn, finalUpdateIn, artnetQueue, monitorChan)
+    listener, _ := infra_ehub.NewListener(8765, rawPacketChannel)
+    parser := app_ehub.NewParser()
+    eHubService := app_ehub.NewService(rawPacketChannel, parser, eHubConfigOut, eHubUpdateOut)
+    processorService, physicalConfigOut := app_processor.NewService(finalConfigIn, finalUpdateIn, artnetQueue, monitorChan)
 
-// Initialisation correcte du sender avec la map UniverseIP
-sender, err := infra_artnet.NewSender(cfg.UniverseIP)
-if err != nil {
-    log.Printf("ERREUR: Impossible d'initialiser le sender ArtNet: %v", err)
-    return nil
-}
+    sender, err := infra_artnet.NewSender(cfg.UniverseIP)
+    if err != nil {
+        log.Printf("ERREUR: Impossible d'initialiser le sender ArtNet: %v", err)
+        return nil
+    }
 
     go func() {
         isFakerActive := false

@@ -1,4 +1,3 @@
-// internal/ui/state.go
 package ui
 
 import (
@@ -7,7 +6,6 @@ import (
     "sync"
 )
 
-// ViewName est un type pour définir nos vues de manière sûre.
 type ViewName string
 
 const (
@@ -16,37 +14,27 @@ const (
     UniverseView ViewName = "universe_view"
 )
 
-// UIState contient l'état complet de l'interface utilisateur.
 type UIState struct {
-    // --- Données de base ---
-    allControllers map[string]map[int][][2]int
-
-    // --- État dynamique ---
-    CurrentView      ViewName
-    controllerIPs    []string
-    selectedIP       string
-    selectedDetails  []UniRange
-    selectedUniverse int
-
-    // CHANGEMENT: Ajout d'une pile pour gérer l'historique de navigation.
-    viewStack []ViewName
-
-    // --- Données et widgets pour la vue de monitoring ---
+    allControllers      map[string]map[int][][2]int
+    CurrentView         ViewName
+    controllerIPs       []string
+    selectedIP          string
+    selectedDetails     []UniRange
+    selectedUniverse    int
+    viewStack           []ViewName
     ledStateMutex       sync.RWMutex
     ledInputWidgets     []*LedWidget
     ledOutputWidgets    []*LedWidget
     universeViewContent fyne.CanvasObject
-    lastOpenedFolder fyne.ListableURI
-
+    lastOpenedFolder    fyne.ListableURI
 }
 
-// NewUIState initialise l'état de l'application.
 func NewUIState(cfg *config.Config) *UIState {
     ips, ctrlMap := BuildModel(cfg)
     return &UIState{
         allControllers: ctrlMap,
         controllerIPs:  ips,
-        CurrentView:    IPListView,          // La vue de départ
-        viewStack:      make([]ViewName, 0), // Initialisation de la pile vide
+        CurrentView:    IPListView,
+        viewStack:      make([]ViewName, 0),
     }
 }

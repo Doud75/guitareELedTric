@@ -11,66 +11,61 @@ type UniRange struct {
 }
 
 func BuildModel(cfg *config.Config) ([]string, map[string]map[int][][2]int) {
-	controllers := make(map[string]map[int][][2]int)
+    controllers := make(map[string]map[int][][2]int)
 
-	// --- CORRECTION ---
-	// Si la configuration est nulle (au démarrage), on ne fait rien
-	// et on retourne des listes vides.
-	if cfg == nil {
-		return []string{}, controllers
-	}
-	// --- FIN DE LA CORRECTION ---
+    if cfg == nil {
+        return []string{}, controllers
+    }
 
-	for _, e := range cfg.RoutingTable {
-		ip := e.IP
-		if controllers[ip] == nil {
-			controllers[ip] = make(map[int][][2]int)
-		}
-		controllers[ip][e.Universe] = append(controllers[ip][e.Universe], [2]int{e.EntityID, e.EntityID})
-	}
-	
-	// Cette partie du code ne sera atteinte que si cfg n'est pas nil,
-	// mais il faut faire attention si `controllers` est vide.
-	if len(controllers) == 0 {
-		return []string{}, controllers
-	}
+    for _, e := range cfg.RoutingTable {
+        ip := e.IP
+        if controllers[ip] == nil {
+            controllers[ip] = make(map[int][][2]int)
+        }
+        controllers[ip][e.Universe] = append(controllers[ip][e.Universe], [2]int{e.EntityID, e.EntityID})
+    }
 
-	for _, uniMap := range controllers {
-		for u, ids := range uniMap {
-			if len(ids) == 0 { continue } // Sécurité supplémentaire
+    if len(controllers) == 0 {
+        return []string{}, controllers
+    }
 
-			list := make([]int, len(ids))
-			for i, p := range ids {
-				list[i] = p[0]
-			}
-			sort.Ints(list)
-			
-			var ranges [][2]int
-			// Encore une sécurité: si la liste est vide après le tri (ne devrait pas arriver)
-			if len(list) == 0 {
-				uniMap[u] = ranges
-				continue
-			}
-			
-			start, end := list[0], list[0]
-			for _, id := range list[1:] {
-				if id == end+1 {
-					end = id
-				} else {
-					ranges = append(ranges, [2]int{start, end})
-					start, end = id, id
-				}
-			}
-			ranges = append(ranges, [2]int{start, end})
-			uniMap[u] = ranges
-		}
-	}
-	
-	ips := make([]string, 0, len(controllers))
-	for ip := range controllers {
-		ips = append(ips, ip)
-	}
-	sort.Strings(ips)
-	
-	return ips, controllers
+    for _, uniMap := range controllers {
+        for u, ids := range uniMap {
+            if len(ids) == 0 {
+                continue
+            }
+
+            list := make([]int, len(ids))
+            for i, p := range ids {
+                list[i] = p[0]
+            }
+            sort.Ints(list)
+
+            var ranges [][2]int
+            if len(list) == 0 {
+                uniMap[u] = ranges
+                continue
+            }
+
+            start, end := list[0], list[0]
+            for _, id := range list[1:] {
+                if id == end+1 {
+                    end = id
+                } else {
+                    ranges = append(ranges, [2]int{start, end})
+                    start, end = id, id
+                }
+            }
+            ranges = append(ranges, [2]int{start, end})
+            uniMap[u] = ranges
+        }
+    }
+
+    ips := make([]string, 0, len(controllers))
+    for ip := range controllers {
+        ips = append(ips, ip)
+    }
+    sort.Strings(ips)
+
+    return ips, controllers
 }

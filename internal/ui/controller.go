@@ -26,7 +26,7 @@ type UIController struct {
 
 func NewUIController(app fyne.App, faker *simulator.Faker, monitorIn <-chan *UniverseMonitorData, configRequester ConfigRequester) *UIController {
     c := &UIController{
-        state:           NewUIState(nil), // Initialise avec une config vide
+        state:           NewUIState(nil),
         onStateChange:   func() {},
         app:             app,
         faker:           faker,
@@ -38,28 +38,20 @@ func NewUIController(app fyne.App, faker *simulator.Faker, monitorIn <-chan *Uni
     return c
 }
 
-// --- AJOUTS POUR LE PATCHING ---
-
-// LoadPatchFile envoie une requête pour charger un nouveau fichier de patch.
 func (c *UIController) LoadPatchFile(uri fyne.URI) {
     log.Printf("UI Controller: Demande de chargement du fichier de patch: %s", uri.Path())
     c.configRequester(ConfigUpdateRequest{PatchFilePath: uri.Path()})
 }
 
-// SetPatchingActive envoie une requête pour activer ou désactiver le patching.
 func (c *UIController) SetPatchingActive(active bool) {
     log.Printf("UI Controller: Demande de changement d'état du patching à: %v", active)
-    // On envoie un pointeur vers la valeur 'active' pour différencier les 3 états (nil, true, false)
     c.configRequester(ConfigUpdateRequest{SetPatchingActive: &active})
 }
 
-// ClearPatch envoie une requête pour vider la map de patch actuelle.
 func (c *UIController) ClearPatch() {
     log.Printf("UI Controller: Demande de suppression du patch actuel.")
     c.configRequester(ConfigUpdateRequest{ClearPatch: true})
 }
-
-// --- Le reste du fichier est inchangé ---
 
 func (c *UIController) SetFaker(newFaker *simulator.Faker) {
     c.faker = newFaker
@@ -73,7 +65,7 @@ func (c *UIController) UpdateWithNewConfig(cfg *config.Config) {
     fyne.Do(func() {
         if cfg == nil {
             c.isConfigLoaded = false
-            c.state = NewUIState(nil) // Reset state
+            c.state = NewUIState(nil)
         } else {
             newIPs, newCtrlMap := BuildModel(cfg)
             c.state.allControllers = newCtrlMap
@@ -82,7 +74,7 @@ func (c *UIController) UpdateWithNewConfig(cfg *config.Config) {
             c.state.CurrentView = IPListView
             c.isConfigLoaded = true
         }
-        c.onStateChange() // Demande un rafraîchissement de l'UI
+        c.onStateChange()
     })
 }
 
@@ -94,7 +86,6 @@ func (c *UIController) LoadNewConfigFile(uri fyne.URI) {
         if listableParent, ok := parent.(fyne.ListableURI); ok {
             c.state.lastOpenedFolder = listableParent
         }
-
     }
 
     c.configRequester(ConfigUpdateRequest{FilePath: uri.Path()})

@@ -1,4 +1,3 @@
-// internal/application/processor/service.go
 package processor
 
 import (
@@ -88,7 +87,6 @@ func (s *Service) Start() {
     }()
 }
 
-// MODIFICATION: La logique de patch est complétée avec l'effacement de la source.
 func (s *Service) processUpdate(updateMsg *ehub.EHubUpdateMsg) {
     if s.routingTable == nil || s.lastPhysicalConfig == nil {
         return
@@ -148,12 +146,10 @@ func (s *Service) processUpdate(updateMsg *ehub.EHubUpdateMsg) {
                             continue
                         }
 
-                        // Lecture depuis le buffer ORIGINAL
                         valR := originalBuffer[sourceIndex]
                         valG := originalBuffer[sourceIndex+1]
                         valB := originalBuffer[sourceIndex+2]
 
-                        // Écriture sur toutes les destinations
                         for _, destChannel := range destinationChannels {
                             destIndex := (destChannel - 1) * 3
                             if destIndex+2 >= 512 {
@@ -164,13 +160,9 @@ func (s *Service) processUpdate(updateMsg *ehub.EHubUpdateMsg) {
                             patchedBuffer[destIndex+2] = valB
                         }
 
-                        // --- MODIFICATION CLÉ ---
-                        // Après avoir copié la valeur, on éteint la source dans le buffer patché.
-                        // On met à zéro les 3 canaux (RVB) de la source.
                         patchedBuffer[sourceIndex] = 0
                         patchedBuffer[sourceIndex+1] = 0
                         patchedBuffer[sourceIndex+2] = 0
-                        // --- FIN DE LA MODIFICATION ---
                     }
                     bufferToSend = patchedBuffer
                 }

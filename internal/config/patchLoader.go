@@ -1,4 +1,3 @@
-// internal/config/patch_loader.go
 package config
 
 import (
@@ -8,8 +7,6 @@ import (
     "strconv"
 )
 
-// LoadPatchMapFromExcel lit un fichier de patch au format Excel.
-// VERSION AMÉLIORÉE : Lit la PREMIÈRE feuille du classeur, quel que soit son nom.
 func LoadPatchMapFromExcel(path string) (map[int]map[int][]int, error) {
     f, err := excelize.OpenFile(path)
     if err != nil {
@@ -17,16 +14,12 @@ func LoadPatchMapFromExcel(path string) (map[int]map[int][]int, error) {
     }
     defer f.Close()
 
-    // --- MODIFICATION CLÉ ---
-    // On récupère la liste de toutes les feuilles.
     sheetList := f.GetSheetList()
     if len(sheetList) == 0 {
         return nil, fmt.Errorf("le fichier Excel ne contient aucune feuille de calcul")
     }
-    // On prend la première feuille de la liste.
     sheetName := sheetList[0]
     log.Printf("Patch Loader: Lecture de la première feuille trouvée : '%s'", sheetName)
-    // --- FIN DE LA MODIFICATION ---
 
     rows, err := f.GetRows(sheetName)
     if err != nil {
@@ -36,17 +29,15 @@ func LoadPatchMapFromExcel(path string) (map[int]map[int][]int, error) {
 
     patchMap := make(map[int]map[int][]int)
 
-    // On parcourt les lignes, en sautant l'en-tête (i=0)
     for i, row := range rows {
         if i == 0 {
-            continue // On ignore la ligne d'en-tête
+            continue
         }
         if len(row) < 3 {
             log.Printf("Patch Loader: Ligne %d ignorée (pas assez de colonnes)", i+1)
             continue
         }
 
-        // Conversion des valeurs texte en nombres
         universe, errU := strconv.Atoi(row[0])
         source, errS := strconv.Atoi(row[1])
         destination, errD := strconv.Atoi(row[2])
